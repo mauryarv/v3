@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "300075626097",
+    "project_id": "cecyt3-11636",
+    "storage_bucket": "cecyt3-11636.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:300075626097:android:f1759edfe6604751df75d0",
+        "android_client_info": {
+          "package_name": "com.example.v3"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDKm4gy3PQOhaj32ucE7z6h2tIk49ePt_E"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
