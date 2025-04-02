@@ -1,11 +1,11 @@
-// ignore_for_file: depend_on_referenced_packages, library_private_types_in_public_api, use_build_context_synchronously
+// ignore_for_file: library_private_types_in_public_api
 
 import 'dart:io';
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 class SubirArchivoScreen extends StatefulWidget {
   final String visitaId;
@@ -25,215 +25,169 @@ class SubirArchivoScreen extends StatefulWidget {
 
 class _SubirArchivoScreenState extends State<SubirArchivoScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  File? _archivoPDF;
-  String? _archivoURL;
-  String? _tipoArchivoSeleccionado;
-  Map<String, bool> archivosSubidos = {
-    'CURP': false,
-    'INE_Tutor': false,
-    'Constancia_Medica': false,
+  File? _archivo;
+  String? _tipoSeleccionado;
+  bool _cargando = false;
+  final Map<String, Map<String, dynamic>> _estadoDocumentos = {
+    'CURP': {'subido': false, 'estado': '', 'url': '', 'fecha': null},
+    'INE_Tutor': {'subido': false, 'estado': '', 'url': '', 'fecha': null},
+    'Constancia_Medica': {
+      'subido': false,
+      'estado': '',
+      'url': '',
+      'fecha': null,
+    },
   };
 
   @override
   void initState() {
     super.initState();
-    _contarArchivosSubidos();
+    _verificarDocumentos();
   }
 
-  // Comprobar si ya hay un archivo pendiente para el tipo seleccionado
-  Future<bool> _hayArchivoPendiente(String tipo) async {
-    DocumentSnapshot visitaDoc =
-        await _firestore
-            .collection('visitas_escolares')
-            .doc(widget.visitaId)
-            .get();
-    if (visitaDoc.exists) {
-      List<dynamic> archivos = [];
-      if (visitaDoc.exists && visitaDoc.data() != null) {
-        Map<String, dynamic> data = visitaDoc.data() as Map<String, dynamic>;
-        if (data.containsKey('archivos_pendientes')) {
-          archivos = data['archivos_pendientes'] as List<dynamic>;
-        }
-      }
+  Future<void> _verificarDocumentos() async {
+    try {
+      final snapshot =
+          await _firestore
+              .collection('visitas_escolares')
+              .doc(widget.visitaId)
+              .get();
 
-      for (var archivo in archivos) {
-        if (archivo['alumnoId'] == widget.alumnoId && archivo['tipo'] == tipo) {
-          if (archivo['estado'] == 'pendiente') {
-            return true; // Ya hay un archivo pendiente de revisión
+      if (snapshot.exists) {
+        final archivos =
+            (snapshot.data()?['archivos_pendientes'] as List? ?? [])
+                .where((a) => a['alumnoId'] == widget.alumnoId)
+                .toList();
+
+        for (var archivo in archivos) {
+          final tipo = archivo['tipo'] as String;
+          if (_estadoDocumentos.containsKey(tipo)) {
+            _estadoDocumentos[tipo] = {
+              'subido': true,
+              'estado': archivo['estado'] ?? '',
+              'url': archivo['archivoUrl'] ?? '',
+              'fecha': archivo['fechaSubida'],
+            };
           }
         }
+        setState(() {});
       }
+    } catch (e) {
+      _mostrarMensaje('Error al verificar documentos: $e', Colors.red);
     }
-    return false; // No hay archivo pendiente
   }
 
-  // Comprobar si ya hay un archivo rechazado para este tipo
-  Future<bool> _hayArchivoRechazado(String tipo) async {
-    DocumentSnapshot visitaDoc =
-        await _firestore
-            .collection('visitas_escolares')
-            .doc(widget.visitaId)
-            .get();
-    if (visitaDoc.exists) {
-      List<dynamic> archivos = [];
-      if (visitaDoc.exists && visitaDoc.data() != null) {
-        Map<String, dynamic> data = visitaDoc.data() as Map<String, dynamic>;
-        if (data.containsKey('archivos_pendientes')) {
-          archivos = data['archivos_pendientes'] as List<dynamic>;
-        }
-      }
-
-      for (var archivo in archivos) {
-        if (archivo['alumnoId'] == widget.alumnoId && archivo['tipo'] == tipo) {
-          if (archivo['estado'] == 'rechazado') {
-            return true; // Ya hay un archivo rechazado para este tipo
+  PreferredSizeWidget _buildAppBar() {
+    return AppBar(
+      title: LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.maxWidth < 400) {
+            return Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.school, color: Colors.white, size: 24),
+                SizedBox(width: 8),
+                Text(
+                  'Visitas',
+                  style: GoogleFonts.poppins(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 18,
+                  ),
+                ),
+              ],
+            );
           }
-        }
-      }
-    }
-    return false; // No hay archivo rechazado
+          return Text(
+            'Visitas Escolares',
+            style: GoogleFonts.poppins(
+              color: Colors.white,
+              fontWeight: FontWeight.w600,
+              fontSize: 20,
+            ),
+          );
+        },
+      ),
+      actions: [],
+      centerTitle: true,
+      backgroundColor: Colors.blue,
+      elevation: 4,
+      flexibleSpace: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFF4C60AF), Color.fromARGB(255, 37, 195, 248)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
+      ),
+    );
   }
 
-  // Contar los archivos subidos
-  Future<void> _contarArchivosSubidos() async {
-    DocumentSnapshot visitaDoc =
-        await _firestore
-            .collection('visitas_escolares')
-            .doc(widget.visitaId)
-            .get();
-    if (visitaDoc.exists) {
-      List<dynamic> archivos = [];
-      if (visitaDoc.exists && visitaDoc.data() != null) {
-        Map<String, dynamic> data = visitaDoc.data() as Map<String, dynamic>;
-        if (data.containsKey('archivos_pendientes')) {
-          archivos = data['archivos_pendientes'] as List<dynamic>;
-        }
-      }
-
-      for (var archivo in archivos) {
-        if (archivo['alumnoId'] == widget.alumnoId &&
-            archivosSubidos.containsKey(archivo['tipo']) &&
-            archivo['estado'] != 'rechazado') {
-          archivosSubidos[archivo['tipo']] = true;
-        }
-      }
-      setState(() {});
+  Future<void> _seleccionarArchivo() async {
+    if (_tipoSeleccionado == null) {
+      _mostrarMensaje('Selecciona un tipo de documento', Colors.orange);
+      return;
     }
-  }
 
-  // Seleccionar archivo
-  Future<void> _seleccionarArchivo(BuildContext context) async {
-    if (_tipoArchivoSeleccionado == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Por favor, selecciona el tipo de archivo.')),
+    final docInfo = _estadoDocumentos[_tipoSeleccionado]!;
+    if (docInfo['subido'] == true && docInfo['estado'] != 'rechazado') {
+      _mostrarMensaje(
+        'Este documento ya fue subido y está ${docInfo['estado']}',
+        Colors.orange,
       );
       return;
     }
 
-    // Verificar si ya hay un archivo pendiente para este tipo
-    bool hayPendiente = await _hayArchivoPendiente(_tipoArchivoSeleccionado!);
-    if (hayPendiente) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Ya tienes un archivo pendiente para este tipo.'),
-        ),
-      );
-      return;
-    }
-
-    // Verificar si hay un archivo rechazado y permitir volver a subirlo
-    bool hayRechazado = await _hayArchivoRechazado(_tipoArchivoSeleccionado!);
-    if (hayRechazado) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Este archivo fue rechazado, puedes subir uno nuevo.'),
-        ),
-      );
-    }
-
-    if (archivosSubidos[_tipoArchivoSeleccionado!] == true) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Este archivo ya ha sido subido.')),
-      );
-      return;
-    }
-
-    FilePickerResult? resultado = await FilePicker.platform.pickFiles(
+    final resultado = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['pdf'],
     );
 
     if (resultado != null) {
-      File archivoSeleccionado = File(resultado.files.single.path!);
-      int fileSize = archivoSeleccionado.lengthSync();
-
-      if (fileSize > 2 * 1024 * 1024) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('El archivo no debe superar los 2MB.')),
-        );
+      final archivo = File(resultado.files.single.path!);
+      if (archivo.lengthSync() > 2 * 1024 * 1024) {
+        _mostrarMensaje('El archivo no debe exceder 2MB', Colors.red);
         return;
       }
-
-      setState(() {
-        _archivoPDF = archivoSeleccionado;
-      });
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('No se seleccionó ningún archivo')),
-      );
+      setState(() => _archivo = archivo);
     }
   }
 
-  // Subir archivo
-  Future<void> _subirArchivo(BuildContext context) async {
-    if (_archivoPDF == null || _tipoArchivoSeleccionado == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Por favor, selecciona un archivo y su tipo.')),
-      );
-      return;
-    }
+  Future<void> _subirDocumento() async {
+    if (_tipoSeleccionado == null || _archivo == null) return;
+
+    setState(() => _cargando = true);
 
     try {
-      String fileName = '$_tipoArchivoSeleccionado.pdf';
-      Reference storageRef = FirebaseStorage.instance.ref().child(
-        'visitas/${widget.visitaId}/${widget.alumnoId}/$fileName',
+      // 1. Subir a Storage
+      final referencia = FirebaseStorage.instance.ref().child(
+        'visitas/${widget.visitaId}/${widget.alumnoId}/$_tipoSeleccionado.pdf',
       );
 
-      // Eliminar archivo rechazado si lo hay
-      DocumentSnapshot visitaDoc =
-          await _firestore
-              .collection('visitas_escolares')
-              .doc(widget.visitaId)
-              .get();
-      if (visitaDoc.exists) {
-        List<dynamic> archivos = [];
-        if (visitaDoc.exists && visitaDoc.data() != null) {
-          Map<String, dynamic> data = visitaDoc.data() as Map<String, dynamic>;
-          if (data.containsKey('archivos_pendientes')) {
-            archivos = data['archivos_pendientes'] as List<dynamic>;
-          }
-        }
+      await referencia.putFile(_archivo!);
+      final url = await referencia.getDownloadURL();
 
-        for (var archivo in archivos) {
-          if (archivo['alumnoId'] == widget.alumnoId &&
-              archivo['tipo'] == _tipoArchivoSeleccionado &&
-              archivo['estado'] == 'rechazado') {
-            // Eliminar archivo rechazado
-            await _firestore
-                .collection('visitas_escolares')
-                .doc(widget.visitaId)
-                .update({
-                  'archivos_pendientes': FieldValue.arrayRemove([archivo]),
-                });
-            break; // Salir del bucle después de eliminar
-          }
-        }
+      // 2. Eliminar documento existente si es rechazado
+      final docInfo = _estadoDocumentos[_tipoSeleccionado]!;
+      if (docInfo['subido'] == true && docInfo['estado'] == 'rechazado') {
+        await _firestore
+            .collection('visitas_escolares')
+            .doc(widget.visitaId)
+            .update({
+              'archivos_pendientes': FieldValue.arrayRemove([
+                {
+                  'alumnoId': widget.alumnoId,
+                  'archivoUrl': docInfo['url'],
+                  'tipo': _tipoSeleccionado,
+                  'estado': 'rechazado',
+                  'fechaSubida': docInfo['fecha'],
+                },
+              ]),
+            });
       }
 
-      // Subir el nuevo archivo
-      await storageRef.putFile(_archivoPDF!);
-      _archivoURL = await storageRef.getDownloadURL();
-
+      // 3. Agregar nuevo documento
       await _firestore
           .collection('visitas_escolares')
           .doc(widget.visitaId)
@@ -241,71 +195,237 @@ class _SubirArchivoScreenState extends State<SubirArchivoScreen> {
             'archivos_pendientes': FieldValue.arrayUnion([
               {
                 'alumnoId': widget.alumnoId,
-                'archivoUrl': _archivoURL,
-                'nombre': fileName,
-                'tipo': _tipoArchivoSeleccionado,
+                'archivoUrl': url,
+                'tipo': _tipoSeleccionado,
                 'estado': 'pendiente',
+                'fechaSubida': Timestamp.now(),
               },
             ]),
           });
 
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Archivo subido exitosamente.')));
-
-      archivosSubidos[_tipoArchivoSeleccionado!] = true;
+      _mostrarMensaje('Documento subido con éxito', Colors.green);
       widget.onArchivoSubido();
-      Navigator.pop(context);
+      if (mounted) Navigator.pop(context);
     } catch (e) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Error al subir el archivo: $e')));
+      _mostrarMensaje('Error al subir documento: $e', Colors.red);
+    } finally {
+      if (mounted) setState(() => _cargando = false);
     }
+  }
+
+  void _mostrarMensaje(String texto, Color color) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(texto),
+        backgroundColor: color,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  Widget _buildTipoDocumento() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8.0),
+          child: Text(
+            'Tipo de Documento',
+            style: GoogleFonts.roboto(fontSize: 14, color: Colors.grey[600]),
+          ),
+        ),
+        DropdownButtonFormField<String>(
+          value: _tipoSeleccionado,
+          items:
+              _estadoDocumentos.keys.map((tipo) {
+                final nombre = tipo.replaceAll('_', ' ');
+                final docInfo = _estadoDocumentos[tipo]!;
+                final estado =
+                    docInfo['subido'] ? ' (${docInfo['estado']})' : '';
+
+                return DropdownMenuItem(
+                  value: tipo,
+                  child: Text(
+                    '$nombre$estado',
+                    style: GoogleFonts.roboto(
+                      color:
+                          docInfo['subido'] && docInfo['estado'] != 'rechazado'
+                              ? Colors.grey
+                              : Colors.black,
+                    ),
+                  ),
+                );
+              }).toList(),
+          onChanged: (value) {
+            final docInfo = _estadoDocumentos[value]!;
+            if (!docInfo['subido'] || docInfo['estado'] == 'rechazado') {
+              setState(() {
+                _tipoSeleccionado = value;
+                _archivo = null;
+              });
+            }
+          },
+          decoration: InputDecoration(
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: Colors.grey[300]!),
+            ),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildArchivoSeleccionado() {
+    if (_archivo == null) return const SizedBox();
+
+    return Column(
+      children: [
+        const SizedBox(height: 20),
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.grey[100],
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.picture_as_pdf, color: Colors.red),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Documento seleccionado:',
+                      style: GoogleFonts.roboto(
+                        fontSize: 12,
+                        color: Colors.grey[600],
+                      ),
+                    ),
+                    Text(
+                      _archivo!.path.split('/').last,
+                      style: GoogleFonts.roboto(fontWeight: FontWeight.w500),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close),
+                onPressed: () => setState(() => _archivo = null),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDocumentosCompletados() {
+    final completados = _estadoDocumentos.entries.where(
+      (e) => e.value['subido'] == true && e.value['estado'] != 'rechazado',
+    );
+    if (completados.isEmpty) return const SizedBox();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 24),
+        Text(
+          'Documentos subidos:',
+          style: GoogleFonts.roboto(fontWeight: FontWeight.w500),
+        ),
+        const SizedBox(height: 8),
+        ...completados.map(
+          (doc) => Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Row(
+              children: [
+                Icon(
+                  doc.value['estado'] == 'aprobado'
+                      ? Icons.check_circle
+                      : Icons.pending,
+                  color:
+                      doc.value['estado'] == 'aprobado'
+                          ? Colors.green
+                          : Colors.orange,
+                  size: 20,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  '${doc.key.replaceAll('_', ' ')} (${doc.value['estado']})',
+                  style: GoogleFonts.roboto(
+                    color:
+                        doc.value['estado'] == 'aprobado'
+                            ? Colors.green
+                            : Colors.black,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Subir Archivos')),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          children: [
-            Text('Selecciona el tipo de archivo a subir:'),
-            DropdownButton<String>(
-              value: _tipoArchivoSeleccionado,
-              hint: Text('Selecciona el tipo de archivo'),
-              items:
-                  archivosSubidos.keys.map((String tipo) {
-                    return DropdownMenuItem<String>(
-                      value: tipo,
-                      child: Text(tipo.replaceAll('_', ' ')),
-                    );
-                  }).toList(),
-              onChanged: (String? newValue) {
-                setState(() {
-                  _tipoArchivoSeleccionado = newValue;
-                });
-              },
-            ),
-            SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: () => _seleccionarArchivo(context),
-              child: Text('Seleccionar archivo PDF'),
-            ),
-            SizedBox(height: 20),
-            if (_archivoPDF != null)
-              Text(
-                'Archivo seleccionado: ${_archivoPDF!.path.split('/').last}',
+      appBar: _buildAppBar(),
+      body:
+          _cargando
+              ? const Center(child: CircularProgressIndicator())
+              : SingleChildScrollView(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      'Sube los documentos requeridos para la visita escolar',
+                      style: GoogleFonts.poppins(fontSize: 16),
+                    ),
+                    const SizedBox(height: 24),
+                    _buildTipoDocumento(),
+                    const SizedBox(height: 16),
+                    OutlinedButton.icon(
+                      icon: const Icon(Icons.upload_file),
+                      label: const Text('Seleccionar archivo PDF'),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      onPressed: _seleccionarArchivo,
+                    ),
+                    _buildArchivoSeleccionado(),
+                    if (_archivo != null) ...[
+                      const SizedBox(height: 16),
+                      ElevatedButton(
+                        onPressed: _subirDocumento,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.blue,
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: Text(
+                          'Subir Documento',
+                          style: GoogleFonts.roboto(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ],
+                    _buildDocumentosCompletados(),
+                  ],
+                ),
               ),
-            SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: () => _subirArchivo(context),
-              child: Text('Subir archivo'),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }

@@ -1,4 +1,4 @@
-// ignore_for_file: library_private_types_in_public_api, use_build_context_synchronously
+// ignore_for_file: library_private_types_in_public_api, use_build_context_synchronously, deprecated_member_use
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
@@ -24,25 +24,22 @@ class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController _numberController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   bool _obscureText = true;
+  bool _isLoading = false;
+  bool _isNumberValid = false;
+  bool _isPasswordValid = false;
 
-  bool _isNumberTextEmpty = true;
-  bool _isPasswordTextEmpty = true;
+  // Estados para validación de contraseña
+  bool _hasMinLength = false;
+  bool _hasUpperCase = false;
+  bool _hasLowerCase = false;
+  bool _hasNumber = false;
+  bool _hasSpecialChar = false;
 
   @override
   void initState() {
     super.initState();
-
-    _numberController.addListener(() {
-      setState(() {
-        _isNumberTextEmpty = _numberController.text.isEmpty;
-      });
-    });
-
-    _passwordController.addListener(() {
-      setState(() {
-        _isPasswordTextEmpty = _passwordController.text.isEmpty;
-      });
-    });
+    _numberController.addListener(_validateNumber);
+    _passwordController.addListener(_validatePassword);
   }
 
   @override
@@ -52,62 +49,94 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
+  void _validateNumber() {
+    final number = _numberController.text.trim();
+    setState(() {
+      _isNumberValid = number.length == 7 || number.length == 10;
+    });
+  }
+
+  void _validatePassword() {
+    final password = _passwordController.text;
+    setState(() {
+      _hasMinLength = password.length >= 8;
+      _hasUpperCase = password.contains(RegExp(r'[A-Z]'));
+      _hasLowerCase = password.contains(RegExp(r'[a-z]'));
+      _hasNumber = password.contains(RegExp(r'[0-9]'));
+      _hasSpecialChar = password.contains(RegExp(r'[!@#$%^&*(),.?":{}|<>]'));
+      _isPasswordValid =
+          _hasMinLength &&
+          _hasUpperCase &&
+          _hasLowerCase &&
+          _hasNumber &&
+          _hasSpecialChar;
+    });
+  }
+
   void _togglePasswordVisibility() {
     setState(() {
       _obscureText = !_obscureText;
     });
   }
 
-  bool _validatePassword(String password) {
-    String pattern =
-        r'^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#\$%\^&\*\(\)_\+\-=\[\]\{\};:\,<>\./?\\|`~]).{8,}$';
-    RegExp regex = RegExp(pattern);
-    return regex.hasMatch(password);
-  }
-
   Future<void> login() async {
     String number = _numberController.text.trim();
     String password = _passwordController.text.trim();
 
+    // Validar campos vacíos
     if (number.isEmpty || password.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Ingrese número y contraseña")),
-      );
-      return;
-    }
-
-    if (!(number.length == 10 || number.length == 7)) {
-      ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text("El número debe tener 7 dígitos o 10 dígitos"),
+          content: Text("Por favor ingrese número y contraseña"),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
         ),
       );
       return;
     }
 
-    if (!_validatePassword(password)) {
+    // Validar formato de número
+    if (!_isNumberValid) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            "La contraseña debe tener al menos 8 caracteres, incluyendo:\n"
-            "- Una letra mayúscula\n"
-            "- Una letra minúscula\n"
-            "- Un número\n"
-            "- Un carácter especial",
+            "El número debe tener 7 dígitos (profesor) o 10 dígitos (alumno)",
           ),
+          backgroundColor: Colors.orange,
+          behavior: SnackBarBehavior.floating,
         ),
       );
       return;
     }
+
+    // Validar contraseña
+    if (!_isPasswordValid) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("La contraseña no cumple con los requisitos mínimos"),
+          backgroundColor: Colors.orange,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+    });
 
     try {
       DocumentSnapshot userDoc =
           await _firestore.collection("usuarios").doc(number).get();
 
       if (!userDoc.exists) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text("Usuario no encontrado")));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Usuario no encontrado"),
+            backgroundColor: Colors.orange,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
         return;
       }
 
@@ -117,16 +146,17 @@ class _LoginScreenState extends State<LoginScreen> {
 
       if (storedPasswordHash == enteredPasswordHash) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Inicio de sesión exitoso")),
+          const SnackBar(
+            content: Text("Inicio de sesión exitoso"),
+            backgroundColor: Colors.green,
+            behavior: SnackBarBehavior.floating,
+          ),
         );
 
         SharedPreferences prefs = await SharedPreferences.getInstance();
         await prefs.setString('user_id', number);
         await prefs.setString('user_role', userDoc["rol"]);
-        await prefs.setString(
-          'user_name',
-          userDoc["nombre"],
-        ); // Guardar el nombre
+        await prefs.setString('user_name', userDoc["nombre"]);
 
         if (number.length == 10) {
           Navigator.pushReplacement(
@@ -149,53 +179,90 @@ class _LoginScreenState extends State<LoginScreen> {
               MaterialPageRoute(builder: (context) => AdminScreen()),
             );
           } else {
-            ScaffoldMessenger.of(
-              context,
-            ).showSnackBar(const SnackBar(content: Text("Rol desconocido")));
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text("Rol desconocido"),
+                backgroundColor: Colors.orange,
+              ),
+            );
           }
         }
       } else {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text("Contraseña incorrecta")));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Contraseña incorrecta"),
+            backgroundColor: Colors.orange,
+          ),
+        );
       }
     } catch (e) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text("Error al iniciar sesión: $e")));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("Error al iniciar sesión: $e"),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final screenHeight = MediaQuery.of(context).size.height;
+    final screenSize = MediaQuery.of(context).size;
+    final isSmallScreen = screenSize.width < 600;
+    final iconSize = isSmallScreen ? 16.0 : 20.0;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text(
+        title: Text(
           'Visitas Escolares V3',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w500),
+          style: GoogleFonts.poppins(
+            color: Colors.white,
+            fontWeight: FontWeight.w500,
+            fontSize: isSmallScreen ? 18 : 22,
+          ),
+        ),
+        centerTitle: true,
+        backgroundColor: Colors.blue,
+        elevation: 4,
+        flexibleSpace: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              colors: [Color(0xFF4C60AF), Color.fromARGB(255, 37, 195, 248)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+          ),
         ),
         actions: <Widget>[
           PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert, color: Colors.white),
             onSelected: (value) {
               if (value == 'about') {
                 showDialog(
                   context: context,
                   builder: (BuildContext context) {
                     return AlertDialog(
-                      title: Text('Acerca de la aplicación'),
+                      title: Text(
+                        'Acerca de la aplicación',
+                        style: GoogleFonts.poppins(),
+                      ),
                       content: Text(
                         'Esta aplicación fue desarrollada para facilitar la gestión de visitas escolares del CECyT 3. '
                         'Su objetivo es proporcionar una herramienta eficiente para administradores, profesores y alumnos.',
+                        style: GoogleFonts.roboto(),
                       ),
                       actions: <Widget>[
                         TextButton(
                           onPressed: () {
                             Navigator.of(context).pop();
                           },
-                          child: Text('Cerrar'),
+                          child: const Text('Cerrar'),
                         ),
                       ],
                     );
@@ -206,17 +273,18 @@ class _LoginScreenState extends State<LoginScreen> {
                   context: context,
                   builder: (BuildContext context) {
                     return AlertDialog(
-                      title: Text('Créditos'),
+                      title: Text('Créditos', style: GoogleFonts.poppins()),
                       content: Text(
                         'Aplicación desarrollada por Reyes Vaca Mauricio Alberto.\n'
                         '© 2025 Todos los derechos reservados.',
+                        style: GoogleFonts.roboto(),
                       ),
                       actions: <Widget>[
                         TextButton(
                           onPressed: () {
                             Navigator.of(context).pop();
                           },
-                          child: Text('Cerrar'),
+                          child: const Text('Cerrar'),
                         ),
                       ],
                     );
@@ -226,165 +294,267 @@ class _LoginScreenState extends State<LoginScreen> {
             },
             itemBuilder:
                 (BuildContext context) => <PopupMenuEntry<String>>[
-                  const PopupMenuItem<String>(
-                    value: 'about', // Valor para identificar la opción
-                    child: Text('Acerca de la aplicación'),
+                  PopupMenuItem<String>(
+                    value: 'about',
+                    child: Text(
+                      'Acerca de la aplicación',
+                      style: GoogleFonts.roboto(),
+                    ),
                   ),
-                  const PopupMenuItem<String>(
-                    value: 'credits', // Valor para identificar la opción
-                    child: Text('Créditos'),
+                  PopupMenuItem<String>(
+                    value: 'credits',
+                    child: Text('Créditos', style: GoogleFonts.roboto()),
                   ),
                 ],
           ),
         ],
-        centerTitle: true,
-        backgroundColor: Colors.blue,
-        shadowColor: Colors.grey,
-        flexibleSpace: Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              colors: [Color(0xFF4C60AF), Color.fromARGB(255, 37, 195, 248)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-          ),
-        ),
       ),
       body: SingleChildScrollView(
-        child: Padding(
-          padding: EdgeInsets.all(screenWidth * 0.05),
+        child: Container(
+          padding: EdgeInsets.symmetric(
+            horizontal: isSmallScreen ? 24.0 : screenSize.width * 0.25,
+            vertical: 24.0,
+          ),
           child: Column(
             children: [
+              SizedBox(height: isSmallScreen ? 20 : 40),
               Text(
                 '¡Bienvenido!',
                 style: GoogleFonts.caveat(
-                  fontSize: 30,
+                  fontSize: 32,
                   color: Colors.blue,
                   fontWeight: FontWeight.bold,
                 ),
               ),
-              SizedBox(height: screenHeight * 0.04),
+              SizedBox(height: isSmallScreen ? 10 : 15),
+              Text(
+                'Ingresa tus credenciales para acceder al sistema',
+                style: GoogleFonts.roboto(
+                  fontSize: isSmallScreen ? 14 : 16,
+                  color: Colors.grey[700],
+                ),
+              ),
+              SizedBox(height: isSmallScreen ? 30 : 40),
               TextField(
                 controller: _numberController,
                 keyboardType: TextInputType.number,
+                maxLength: 10,
                 decoration: InputDecoration(
-                  hintText: "P.ej. 1234567 o 1234567890",
-                  labelText: "Boleta/Trabajador",
+                  counterText: "",
+                  hintText: "Ejemplo: 1234567 o 1234567890",
+                  labelText: "Boleta/ID de trabajador",
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: Colors.blue),
                   ),
-                  prefixIcon: Icon(Icons.numbers),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: Colors.blue, width: 2),
+                  ),
+                  contentPadding: EdgeInsets.symmetric(
+                    vertical: isSmallScreen ? 16 : 20,
+                    horizontal: 16,
+                  ),
+                  prefixIcon: const Icon(Icons.numbers, color: Colors.blue),
                   suffixIcon:
-                      _isNumberTextEmpty
+                      _numberController.text.isEmpty
                           ? null
                           : IconButton(
-                            icon: Icon(Icons.clear),
-                            onPressed: () {
-                              _numberController.clear();
-                            },
+                            icon: Icon(
+                              _isNumberValid ? Icons.check_circle : Icons.error,
+                              color: _isNumberValid ? Colors.green : Colors.red,
+                            ),
+                            onPressed: null,
                           ),
                 ),
+                style: TextStyle(fontSize: isSmallScreen ? 16 : 18),
               ),
-              SizedBox(height: screenHeight * 0.02),
+              SizedBox(height: isSmallScreen ? 20 : 30),
               TextField(
                 controller: _passwordController,
                 obscureText: _obscureText,
                 decoration: InputDecoration(
-                  hintText: "P.ej. Admin1@",
                   labelText: "Contraseña",
+                  hintText: "Ingresa tu contraseña",
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: Colors.blue),
                   ),
-                  prefixIcon: Icon(Icons.password),
-                  suffixIcon:
-                      _isPasswordTextEmpty
-                          ? Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              IconButton(
-                                icon: Icon(
-                                  _obscureText
-                                      ? Icons.visibility
-                                      : Icons.visibility_off,
-                                ),
-                                onPressed: _togglePasswordVisibility,
-                              ),
-                            ],
-                          )
-                          : Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              IconButton(
-                                icon: Icon(Icons.clear),
-                                onPressed: () {
-                                  _passwordController.clear();
-                                },
-                              ),
-                              IconButton(
-                                icon: Icon(
-                                  _obscureText
-                                      ? Icons.visibility
-                                      : Icons.visibility_off,
-                                ),
-                                onPressed: _togglePasswordVisibility,
-                              ),
-                            ],
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: Colors.blue, width: 2),
+                  ),
+                  contentPadding: EdgeInsets.symmetric(
+                    vertical: isSmallScreen ? 16 : 20,
+                    horizontal: 16,
+                  ),
+                  prefixIcon: const Icon(
+                    Icons.lock_outline,
+                    color: Colors.blue,
+                  ),
+                  suffixIcon: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: Icon(
+                          _obscureText
+                              ? Icons.visibility
+                              : Icons.visibility_off,
+                          color: Colors.grey,
+                        ),
+                        onPressed: _togglePasswordVisibility,
+                      ),
+                      if (_passwordController.text.isNotEmpty)
+                        IconButton(
+                          icon: Icon(
+                            _isPasswordValid ? Icons.check_circle : Icons.error,
+                            color: _isPasswordValid ? Colors.green : Colors.red,
                           ),
-                ),
-              ),
-              SizedBox(height: screenHeight * 0.04),
-              Container(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [Colors.blue, Colors.purple],
-                  ),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: ElevatedButton(
-                  onPressed: login, // Tu función de login
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.transparent,
-                    shadowColor: Colors.transparent,
-                    minimumSize: Size(screenWidth * 0.8, screenHeight * 0.06),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                  ),
-                  child: Text(
-                    "Iniciar sesión",
-                    style: GoogleFonts.poppins(
-                      fontSize: 18,
-                      color: Colors.white,
-                    ),
+                          onPressed: null,
+                        ),
+                    ],
                   ),
                 ),
+                style: TextStyle(fontSize: isSmallScreen ? 16 : 18),
               ),
-              SizedBox(height: screenHeight * 0.02),
-              TextButton(
-                onPressed: () {
-                  Navigator.pushAndRemoveUntil(
-                    context,
-                    MaterialPageRoute(builder: (context) => RegisterScreen()),
-                    (Route<dynamic> route) => false,
-                  );
-                },
-                child: Text("¿No tienes cuenta? Regístrate"),
-              ),
-              TextButton(
-                onPressed: () {
-                  Navigator.pushAndRemoveUntil(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => ForgotPasswordScreen(),
+              SizedBox(height: isSmallScreen ? 10 : 15),
+              _buildPasswordRequirements(iconSize),
+              SizedBox(height: isSmallScreen ? 30 : 40),
+              SizedBox(
+                width: double.infinity,
+                child: Container(
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [Colors.blue, Colors.purple],
+                      begin: Alignment.centerLeft,
+                      end: Alignment.centerRight,
                     ),
-                    (Route<dynamic> route) => false,
-                  );
-                },
-                child: Text("¿Olvidaste tu contraseña?"),
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.blue.withOpacity(0.3),
+                        blurRadius: 8,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: ElevatedButton(
+                    onPressed: _isLoading ? null : login,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.transparent,
+                      shadowColor: Colors.transparent,
+                      padding: EdgeInsets.symmetric(
+                        vertical: isSmallScreen ? 16 : 20,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child:
+                        _isLoading
+                            ? const SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 3,
+                              ),
+                            )
+                            : Text(
+                              "Iniciar sesión",
+                              style: GoogleFonts.poppins(
+                                fontSize: isSmallScreen ? 16 : 18,
+                                color: Colors.white,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                  ),
+                ),
               ),
+              SizedBox(height: isSmallScreen ? 20 : 30),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  TextButton(
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const RegisterScreen(),
+                        ),
+                      );
+                    },
+                    child: Text(
+                      "Registrarse",
+                      style: GoogleFonts.roboto(
+                        fontSize: isSmallScreen ? 14 : 16,
+                        color: Colors.blue,
+                      ),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const ForgotPasswordScreen(),
+                        ),
+                      );
+                    },
+                    child: Text(
+                      "¿Olvidaste tu contraseña?",
+                      style: GoogleFonts.roboto(
+                        fontSize: isSmallScreen ? 14 : 16,
+                        color: Colors.blue,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              if (!isSmallScreen) SizedBox(height: screenSize.height * 0.1),
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildPasswordRequirements(double iconSize) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildValidationRow("Mínimo 8 caracteres", _hasMinLength, iconSize),
+        _buildValidationRow("Al menos una mayúscula", _hasUpperCase, iconSize),
+        _buildValidationRow("Al menos una minúscula", _hasLowerCase, iconSize),
+        _buildValidationRow("Al menos un número", _hasNumber, iconSize),
+        _buildValidationRow(
+          "Al menos un carácter especial (!@#\$%^&*)",
+          _hasSpecialChar,
+          iconSize,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildValidationRow(String text, bool isValid, double iconSize) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4.0),
+      child: Row(
+        children: [
+          Icon(
+            isValid ? Icons.check_circle : Icons.error,
+            color: isValid ? Colors.green : Colors.grey,
+            size: iconSize,
+          ),
+          const SizedBox(width: 8),
+          Text(
+            text,
+            style: TextStyle(
+              color: isValid ? Colors.green : Colors.grey,
+              fontSize: iconSize - 2,
+            ),
+          ),
+        ],
       ),
     );
   }

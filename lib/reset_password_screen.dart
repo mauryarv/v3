@@ -1,4 +1,4 @@
-// ignore_for_file: library_private_types_in_public_api, use_build_context_synchronously
+// ignore_for_file: library_private_types_in_public_api, use_build_context_synchronously, deprecated_member_use
 
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -50,6 +50,8 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text("La contraseña no cumple con los requisitos"),
+          backgroundColor: Colors.orange,
+          behavior: SnackBarBehavior.floating,
         ),
       );
       return;
@@ -68,7 +70,11 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Contraseña restablecida exitosamente")),
+        const SnackBar(
+          content: Text("Contraseña restablecida exitosamente"),
+          backgroundColor: Colors.green,
+          behavior: SnackBarBehavior.floating,
+        ),
       );
 
       Navigator.pushAndRemoveUntil(
@@ -77,9 +83,13 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
         (route) => false,
       );
     } catch (e) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text("Error: ${e.toString()}")));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("Error: ${e.toString()}"),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
     } finally {
       if (mounted) {
         setState(() {
@@ -97,22 +107,43 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text(
+        title: Text(
           'Visitas Escolares V3',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w500),
+          style: GoogleFonts.poppins(
+            color: Colors.white,
+            fontWeight: FontWeight.w500,
+            fontSize: isSmallScreen ? 18 : 22,
+          ),
+        ),
+        centerTitle: true,
+        backgroundColor: Colors.blue,
+        elevation: 4,
+        flexibleSpace: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              colors: [Color(0xFF4C60AF), Color.fromARGB(255, 37, 195, 248)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+          ),
         ),
         actions: <Widget>[
           PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert, color: Colors.white),
             onSelected: (value) {
               if (value == 'about') {
                 showDialog(
                   context: context,
                   builder: (BuildContext context) {
                     return AlertDialog(
-                      title: const Text('Acerca de la aplicación'),
-                      content: const Text(
+                      title: Text(
+                        'Acerca de la aplicación',
+                        style: GoogleFonts.poppins(),
+                      ),
+                      content: Text(
                         'Esta aplicación fue desarrollada para facilitar la gestión de visitas escolares del CECyT 3. '
                         'Su objetivo es proporcionar una herramienta eficiente para administradores, profesores y alumnos.',
+                        style: GoogleFonts.roboto(),
                       ),
                       actions: <Widget>[
                         TextButton(
@@ -130,10 +161,11 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
                   context: context,
                   builder: (BuildContext context) {
                     return AlertDialog(
-                      title: const Text('Créditos'),
-                      content: const Text(
+                      title: Text('Créditos', style: GoogleFonts.poppins()),
+                      content: Text(
                         'Aplicación desarrollada por Reyes Vaca Mauricio Alberto.\n'
                         '© 2025 Todos los derechos reservados.',
+                        style: GoogleFonts.roboto(),
                       ),
                       actions: <Widget>[
                         TextButton(
@@ -150,67 +182,70 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
             },
             itemBuilder:
                 (BuildContext context) => <PopupMenuEntry<String>>[
-                  const PopupMenuItem<String>(
+                  PopupMenuItem<String>(
                     value: 'about',
-                    child: Text('Acerca de la aplicación'),
+                    child: Text(
+                      'Acerca de la aplicación',
+                      style: GoogleFonts.roboto(),
+                    ),
                   ),
-                  const PopupMenuItem<String>(
+                  PopupMenuItem<String>(
                     value: 'credits',
-                    child: Text('Créditos'),
+                    child: Text('Créditos', style: GoogleFonts.roboto()),
                   ),
                 ],
           ),
         ],
-        centerTitle: true,
-        backgroundColor: Colors.blue,
-        shadowColor: Colors.grey,
-        flexibleSpace: Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              colors: [Color(0xFF4C60AF), Color.fromARGB(255, 37, 195, 248)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-          ),
-        ),
       ),
       body: SingleChildScrollView(
         child: Container(
           padding: EdgeInsets.symmetric(
-            horizontal: isSmallScreen ? 16.0 : screenSize.width * 0.2,
-            vertical: 16.0,
+            horizontal: isSmallScreen ? 24.0 : screenSize.width * 0.25,
+            vertical: 24.0,
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               SizedBox(height: isSmallScreen ? 20 : 40),
               Text(
-                "Nueva contraseña",
+                'Restablecer contraseña',
                 style: GoogleFonts.caveat(
-                  fontSize: 30,
+                  fontSize: 32,
                   color: Colors.blue,
                   fontWeight: FontWeight.bold,
                 ),
               ),
-              SizedBox(height: isSmallScreen ? 20 : 30),
+              SizedBox(height: isSmallScreen ? 10 : 15),
               Text(
-                "Ingresa tu nueva contraseña:",
-                style: TextStyle(
-                  fontSize: isSmallScreen ? 16 : 18,
+                'Crea una nueva contraseña segura para tu cuenta',
+                style: GoogleFonts.roboto(
+                  fontSize: isSmallScreen ? 14 : 16,
                   color: Colors.grey[700],
                 ),
               ),
-              SizedBox(height: isSmallScreen ? 10 : 15),
+              SizedBox(height: isSmallScreen ? 30 : 40),
               TextField(
                 controller: _newPasswordController,
                 obscureText: _obscurePassword,
                 onChanged: _validatePassword,
                 decoration: InputDecoration(
                   labelText: "Nueva contraseña",
-                  border: const OutlineInputBorder(),
+                  hintText: "Ingresa tu nueva contraseña",
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: Colors.blue),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: Colors.blue, width: 2),
+                  ),
                   contentPadding: EdgeInsets.symmetric(
-                    vertical: isSmallScreen ? 12 : 16,
-                    horizontal: 12,
+                    vertical: isSmallScreen ? 16 : 20,
+                    horizontal: 16,
+                  ),
+                  prefixIcon: const Icon(
+                    Icons.lock_outline,
+                    color: Colors.blue,
                   ),
                   suffixIcon: IconButton(
                     icon: Icon(
@@ -226,7 +261,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
                     },
                   ),
                 ),
-                style: TextStyle(fontSize: isSmallScreen ? 14 : 16),
+                style: TextStyle(fontSize: isSmallScreen ? 16 : 18),
               ),
               SizedBox(height: isSmallScreen ? 15 : 20),
               Column(
@@ -238,17 +273,17 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
                     iconSize,
                   ),
                   _buildValidationRow(
-                    "Al menos una mayúscula",
+                    "Al menos una mayúscula (A-Z)",
                     _hasUpperCase,
                     iconSize,
                   ),
                   _buildValidationRow(
-                    "Al menos una minúscula",
+                    "Al menos una minúscula (a-z)",
                     _hasLowerCase,
                     iconSize,
                   ),
                   _buildValidationRow(
-                    "Al menos un número",
+                    "Al menos un número (0-9)",
                     _hasNumber,
                     iconSize,
                   ),
@@ -259,37 +294,60 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
                   ),
                 ],
               ),
-              SizedBox(height: isSmallScreen ? 20 : 30),
-              Container(
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [Colors.blue, Colors.purple],
-                  ),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: ElevatedButton(
-                  onPressed: _isLoading ? null : _resetPassword,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.transparent,
-                    shadowColor: Colors.transparent,
-                    minimumSize: Size(double.infinity, isSmallScreen ? 50 : 60),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
+              SizedBox(height: isSmallScreen ? 30 : 40),
+              SizedBox(
+                width: double.infinity,
+                child: Container(
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [Colors.blue, Colors.purple],
+                      begin: Alignment.centerLeft,
+                      end: Alignment.centerRight,
                     ),
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.blue.withOpacity(0.3),
+                        blurRadius: 8,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
                   ),
-                  child:
-                      _isLoading
-                          ? const CircularProgressIndicator(color: Colors.white)
-                          : Text(
-                            "Restablecer contraseña",
-                            style: GoogleFonts.poppins(
-                              fontSize: isSmallScreen ? 16 : 18,
-                              color: Colors.white,
+                  child: ElevatedButton(
+                    onPressed: _isLoading ? null : _resetPassword,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.transparent,
+                      shadowColor: Colors.transparent,
+                      padding: EdgeInsets.symmetric(
+                        vertical: isSmallScreen ? 16 : 20,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child:
+                        _isLoading
+                            ? const SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 3,
+                              ),
+                            )
+                            : Text(
+                              "Restablecer contraseña",
+                              style: GoogleFonts.poppins(
+                                fontSize: isSmallScreen ? 16 : 18,
+                                color: Colors.white,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
-                          ),
+                  ),
                 ),
               ),
               if (!isSmallScreen) SizedBox(height: screenSize.height * 0.1),
+              SizedBox(height: isSmallScreen ? 20 : 30),
             ],
           ),
         ),
@@ -307,7 +365,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
             color: isValid ? Colors.green : Colors.grey,
             size: iconSize,
           ),
-          SizedBox(width: 8),
+          const SizedBox(width: 8),
           Text(
             text,
             style: TextStyle(
