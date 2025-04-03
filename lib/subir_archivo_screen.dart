@@ -25,6 +25,7 @@ class SubirArchivoScreen extends StatefulWidget {
 
 class _SubirArchivoScreenState extends State<SubirArchivoScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseStorage _storage = FirebaseStorage.instance;
   File? _archivo;
   String? _tipoSeleccionado;
   bool _cargando = false;
@@ -52,16 +53,31 @@ class _SubirArchivoScreenState extends State<SubirArchivoScreen> {
               .collection('visitas_escolares')
               .doc(widget.visitaId)
               .get();
-
       if (snapshot.exists) {
         final archivos =
             (snapshot.data()?['archivos_pendientes'] as List? ?? [])
                 .where((a) => a['alumnoId'] == widget.alumnoId)
                 .toList();
 
+        // Conservar solo el más reciente por tipo
+        final Map<String, dynamic> archivosUnicos = {};
         for (var archivo in archivos) {
           final tipo = archivo['tipo'] as String;
-          if (_estadoDocumentos.containsKey(tipo)) {
+          final fecha = archivo['fechaSubida'] as Timestamp?;
+          if (!archivosUnicos.containsKey(tipo) ||
+              (fecha != null &&
+                  (archivosUnicos[tipo]['fechaSubida'] as Timestamp).compareTo(
+                        fecha,
+                      ) <
+                      0)) {
+            archivosUnicos[tipo] = archivo;
+          }
+        }
+
+        // Actualizar estado local
+        for (var tipo in _estadoDocumentos.keys) {
+          if (archivosUnicos.containsKey(tipo)) {
+            final archivo = archivosUnicos[tipo];
             _estadoDocumentos[tipo] = {
               'subido': true,
               'estado': archivo['estado'] ?? '',
@@ -77,53 +93,6 @@ class _SubirArchivoScreenState extends State<SubirArchivoScreen> {
     }
   }
 
-  PreferredSizeWidget _buildAppBar() {
-    return AppBar(
-      title: LayoutBuilder(
-        builder: (context, constraints) {
-          if (constraints.maxWidth < 400) {
-            return Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.school, color: Colors.white, size: 24),
-                SizedBox(width: 8),
-                Text(
-                  'Visitas',
-                  style: GoogleFonts.poppins(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 18,
-                  ),
-                ),
-              ],
-            );
-          }
-          return Text(
-            'Visitas Escolares',
-            style: GoogleFonts.poppins(
-              color: Colors.white,
-              fontWeight: FontWeight.w600,
-              fontSize: 20,
-            ),
-          );
-        },
-      ),
-      actions: [],
-      centerTitle: true,
-      backgroundColor: Colors.blue,
-      elevation: 4,
-      flexibleSpace: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFF4C60AF), Color.fromARGB(255, 37, 195, 248)],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-        ),
-      ),
-    );
-  }
-
   Future<void> _seleccionarArchivo() async {
     if (_tipoSeleccionado == null) {
       _mostrarMensaje('Selecciona un tipo de documento', Colors.orange);
@@ -131,9 +100,9 @@ class _SubirArchivoScreenState extends State<SubirArchivoScreen> {
     }
 
     final docInfo = _estadoDocumentos[_tipoSeleccionado]!;
-    if (docInfo['subido'] == true && docInfo['estado'] != 'rechazado') {
+    if (docInfo['subido'] == true && docInfo['estado'] == 'aprobado') {
       _mostrarMensaje(
-        'Este documento ya fue subido y está ${docInfo['estado']}',
+        'Este documento ya fue aprobado y no puede ser modificado',
         Colors.orange,
       );
       return;
@@ -154,54 +123,40 @@ class _SubirArchivoScreenState extends State<SubirArchivoScreen> {
     }
   }
 
+  Future<void> _eliminarArchivoStorage(String url) async {
+    try {
+      if (url.isNotEmpty) {
+        final ref = _storage.refFromURL(url);
+        await ref.delete();
+      }
+    } catch (e) {
+      debugPrint('Error al eliminar archivo de Storage: $e');
+    }
+  }
+
   Future<void> _subirDocumento() async {
     if (_tipoSeleccionado == null || _archivo == null) return;
 
     setState(() => _cargando = true);
-
     try {
-      // 1. Subir a Storage
-      final referencia = FirebaseStorage.instance.ref().child(
-        'visitas/${widget.visitaId}/${widget.alumnoId}/$_tipoSeleccionado.pdf',
-      );
-
+      final nombreArchivo = _generarNombreArchivo(_tipoSeleccionado!);
+      final rutaStorage =
+          'visitas/${widget.visitaId}/${widget.alumnoId}/$nombreArchivo';
+      final referencia = _storage.ref().child(rutaStorage);
       await referencia.putFile(_archivo!);
       final url = await referencia.getDownloadURL();
 
-      // 2. Eliminar documento existente si es rechazado
-      final docInfo = _estadoDocumentos[_tipoSeleccionado]!;
-      if (docInfo['subido'] == true && docInfo['estado'] == 'rechazado') {
-        await _firestore
-            .collection('visitas_escolares')
-            .doc(widget.visitaId)
-            .update({
-              'archivos_pendientes': FieldValue.arrayRemove([
-                {
-                  'alumnoId': widget.alumnoId,
-                  'archivoUrl': docInfo['url'],
-                  'tipo': _tipoSeleccionado,
-                  'estado': 'rechazado',
-                  'fechaSubida': docInfo['fecha'],
-                },
-              ]),
-            });
-      }
+      // Obtener la URL del archivo anterior para eliminarlo
+      final urlAnterior =
+          _estadoDocumentos[_tipoSeleccionado]?['url'] as String? ?? '';
 
-      // 3. Agregar nuevo documento
-      await _firestore
-          .collection('visitas_escolares')
-          .doc(widget.visitaId)
-          .update({
-            'archivos_pendientes': FieldValue.arrayUnion([
-              {
-                'alumnoId': widget.alumnoId,
-                'archivoUrl': url,
-                'tipo': _tipoSeleccionado,
-                'estado': 'pendiente',
-                'fechaSubida': Timestamp.now(),
-              },
-            ]),
-          });
+      // Actualizar Firestore
+      await _reemplazarDocumentoExistente(url, nombreArchivo);
+
+      // Eliminar el archivo anterior si existe
+      if (urlAnterior.isNotEmpty) {
+        await _eliminarArchivoStorage(urlAnterior);
+      }
 
       _mostrarMensaje('Documento subido con éxito', Colors.green);
       widget.onArchivoSubido();
@@ -210,6 +165,61 @@ class _SubirArchivoScreenState extends State<SubirArchivoScreen> {
       _mostrarMensaje('Error al subir documento: $e', Colors.red);
     } finally {
       if (mounted) setState(() => _cargando = false);
+    }
+  }
+
+  Future<void> _reemplazarDocumentoExistente(
+    String url,
+    String nombreArchivo,
+  ) async {
+    final visitaRef = _firestore
+        .collection('visitas_escolares')
+        .doc(widget.visitaId);
+    final visitaSnapshot = await visitaRef.get();
+
+    if (visitaSnapshot.exists) {
+      final archivosPendientes = List.from(
+        visitaSnapshot.data()?['archivos_pendientes'] ?? [],
+      );
+
+      // Eliminar cualquier versión anterior del mismo tipo para este alumno
+      archivosPendientes.removeWhere(
+        (archivo) =>
+            archivo['alumnoId'] == widget.alumnoId &&
+            archivo['tipo'] == _tipoSeleccionado,
+      );
+
+      // Agregar el nuevo documento
+      archivosPendientes.add({
+        'alumnoId': widget.alumnoId,
+        'archivoUrl': url,
+        'tipo': _tipoSeleccionado,
+        'nombre': _getNombreLegible(_tipoSeleccionado!),
+        'nombreArchivo': nombreArchivo,
+        'estado': 'pendiente',
+        'fechaSubida': Timestamp.now(),
+      });
+
+      // Actualizar Firestore
+      await visitaRef.update({'archivos_pendientes': archivosPendientes});
+    }
+  }
+
+  String _generarNombreArchivo(String tipo) {
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    return '${tipo}_${widget.alumnoId}_$timestamp.pdf';
+  }
+
+  String _getNombreLegible(String tipo) {
+    switch (tipo) {
+      case 'CURP':
+        return 'CURP';
+      case 'INE_Tutor':
+        return 'INE del Tutor';
+      case 'Constancia_Medica':
+        return 'Constancia Médica';
+      default:
+        return tipo.replaceAll('_', ' ');
     }
   }
 
@@ -223,100 +233,71 @@ class _SubirArchivoScreenState extends State<SubirArchivoScreen> {
     );
   }
 
+  PreferredSizeWidget _buildAppBar() {
+    return AppBar(
+      title: Text(
+        'Subir Documentos',
+        style: GoogleFonts.poppins(
+          color: Colors.white,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      centerTitle: true,
+      backgroundColor: Colors.blue,
+      flexibleSpace: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFF4C60AF), Color.fromARGB(255, 37, 195, 248)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildTipoDocumento() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Padding(
-          padding: const EdgeInsets.only(bottom: 8.0),
-          child: Text(
-            'Tipo de Documento',
-            style: GoogleFonts.roboto(fontSize: 14, color: Colors.grey[600]),
-          ),
+        Text(
+          'Tipo de Documento',
+          style: GoogleFonts.roboto(fontSize: 14, color: Colors.grey[600]),
         ),
+        const SizedBox(height: 8),
         DropdownButtonFormField<String>(
           value: _tipoSeleccionado,
           items:
-              _estadoDocumentos.keys.map((tipo) {
-                final nombre = tipo.replaceAll('_', ' ');
-                final docInfo = _estadoDocumentos[tipo]!;
-                final estado =
-                    docInfo['subido'] ? ' (${docInfo['estado']})' : '';
-
-                return DropdownMenuItem(
-                  value: tipo,
-                  child: Text(
-                    '$nombre$estado',
-                    style: GoogleFonts.roboto(
-                      color:
-                          docInfo['subido'] && docInfo['estado'] != 'rechazado'
-                              ? Colors.grey
-                              : Colors.black,
-                    ),
-                  ),
-                );
-              }).toList(),
-          onChanged: (value) {
-            final docInfo = _estadoDocumentos[value]!;
-            if (!docInfo['subido'] || docInfo['estado'] == 'rechazado') {
-              setState(() {
+              _estadoDocumentos.entries
+                  .where(
+                    (entry) =>
+                        !entry.value['subido'] ||
+                        entry.value['estado'] == 'rechazado',
+                  )
+                  .map((entry) {
+                    final tipo = entry.key;
+                    final nombre = _getNombreLegible(tipo);
+                    final estado =
+                        entry.value['subido']
+                            ? ' (${entry.value['estado']})'
+                            : '';
+                    return DropdownMenuItem(
+                      value: tipo,
+                      child: Text(
+                        '$nombre$estado',
+                        style: GoogleFonts.roboto(),
+                      ),
+                    );
+                  })
+                  .toList(),
+          onChanged:
+              (value) => setState(() {
                 _tipoSeleccionado = value;
                 _archivo = null;
-              });
-            }
-          },
+              }),
           decoration: InputDecoration(
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: Colors.grey[300]!),
-            ),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
             contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildArchivoSeleccionado() {
-    if (_archivo == null) return const SizedBox();
-
-    return Column(
-      children: [
-        const SizedBox(height: 20),
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: Colors.grey[100],
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Row(
-            children: [
-              Icon(Icons.picture_as_pdf, color: Colors.red),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Documento seleccionado:',
-                      style: GoogleFonts.roboto(
-                        fontSize: 12,
-                        color: Colors.grey[600],
-                      ),
-                    ),
-                    Text(
-                      _archivo!.path.split('/').last,
-                      style: GoogleFonts.roboto(fontWeight: FontWeight.w500),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.close),
-                onPressed: () => setState(() => _archivo = null),
-              ),
-            ],
           ),
         ),
       ],
@@ -325,7 +306,7 @@ class _SubirArchivoScreenState extends State<SubirArchivoScreen> {
 
   Widget _buildDocumentosCompletados() {
     final completados = _estadoDocumentos.entries.where(
-      (e) => e.value['subido'] == true && e.value['estado'] != 'rechazado',
+      (e) => e.value['subido'] == true && e.value['estado'] == 'aprobado',
     );
     if (completados.isEmpty) return const SizedBox();
 
@@ -334,7 +315,7 @@ class _SubirArchivoScreenState extends State<SubirArchivoScreen> {
       children: [
         const SizedBox(height: 24),
         Text(
-          'Documentos subidos:',
+          'Documentos aprobados:',
           style: GoogleFonts.roboto(fontWeight: FontWeight.w500),
         ),
         const SizedBox(height: 8),
@@ -343,26 +324,9 @@ class _SubirArchivoScreenState extends State<SubirArchivoScreen> {
             padding: const EdgeInsets.symmetric(vertical: 4),
             child: Row(
               children: [
-                Icon(
-                  doc.value['estado'] == 'aprobado'
-                      ? Icons.check_circle
-                      : Icons.pending,
-                  color:
-                      doc.value['estado'] == 'aprobado'
-                          ? Colors.green
-                          : Colors.orange,
-                  size: 20,
-                ),
+                const Icon(Icons.check_circle, color: Colors.green, size: 20),
                 const SizedBox(width: 8),
-                Text(
-                  '${doc.key.replaceAll('_', ' ')} (${doc.value['estado']})',
-                  style: GoogleFonts.roboto(
-                    color:
-                        doc.value['estado'] == 'aprobado'
-                            ? Colors.green
-                            : Colors.black,
-                  ),
-                ),
+                Text(_getNombreLegible(doc.key), style: GoogleFonts.roboto()),
               ],
             ),
           ),
@@ -393,33 +357,25 @@ class _SubirArchivoScreenState extends State<SubirArchivoScreen> {
                     OutlinedButton.icon(
                       icon: const Icon(Icons.upload_file),
                       label: const Text('Seleccionar archivo PDF'),
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
                       onPressed: _seleccionarArchivo,
                     ),
-                    _buildArchivoSeleccionado(),
                     if (_archivo != null) ...[
+                      const SizedBox(height: 16),
+                      ListTile(
+                        leading: const Icon(
+                          Icons.picture_as_pdf,
+                          color: Colors.red,
+                        ),
+                        title: Text(_archivo!.path.split('/').last),
+                        trailing: IconButton(
+                          icon: const Icon(Icons.close),
+                          onPressed: () => setState(() => _archivo = null),
+                        ),
+                      ),
                       const SizedBox(height: 16),
                       ElevatedButton(
                         onPressed: _subirDocumento,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.blue,
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                        child: Text(
-                          'Subir Documento',
-                          style: GoogleFonts.roboto(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
+                        child: const Text('Subir Documento'),
                       ),
                     ],
                     _buildDocumentosCompletados(),

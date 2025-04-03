@@ -4,10 +4,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:v3/detalle_visita_screen.dart';
-import 'package:v3/login_screen.dart';
-import 'package:v3/subir_archivo_screen.dart';
 import 'package:intl/intl.dart';
+import 'detalle_visita_screen.dart';
+import 'login_screen.dart';
+import 'subir_archivo_screen.dart';
 
 class AlumnoScreen extends StatefulWidget {
   final String alumnoId;
@@ -58,109 +58,125 @@ class _AlumnoScreenState extends State<AlumnoScreen> {
     final snapshot =
         await _firestore.collection('usuarios').doc(widget.alumnoId).get();
     if (snapshot.exists && mounted) {
-      setState(() => alumnoNombre = snapshot['nombre']);
+      setState(() => alumnoNombre = snapshot.get('nombre') as String?);
     }
   }
 
   Future<void> _cargarVisitas() async {
-    final visitasSnapshot =
-        await _firestore
-            .collection('visitas_escolares')
-            .where('alumnos', arrayContains: widget.alumnoId)
-            .get();
+    try {
+      final visitasSnapshot =
+          await _firestore
+              .collection('visitas_escolares')
+              .where('alumnos', arrayContains: widget.alumnoId)
+              .get();
 
-    final visitasList =
-        visitasSnapshot.docs.map((doc) {
-          final data = doc.data();
-          final archivosPendientes =
-              (data['archivos_pendientes'] ?? [])
-                  .where((archivo) => archivo['alumnoId'] == widget.alumnoId)
-                  .toList();
+      final visitasList =
+          visitasSnapshot.docs.map((doc) {
+            final data = doc.data();
+            final archivosRaw =
+                data['archivos_pendientes'] as List<dynamic>? ?? [];
 
-          return {
-            'id': doc.id,
-            'titulo': data['titulo'],
-            'empresa': data['empresa'],
-            'fecha_hora': data['fecha_hora']?.toDate(),
-            'profesor': data['profesor'],
-            'archivos_pendientes': archivosPendientes,
-          };
-        }).toList();
+            // Filtrar documentos del alumno y conservar el más reciente por tipo
+            final Map<String, dynamic> archivosUnicos = {};
+            for (var archivo in archivosRaw) {
+              final archivoMap = archivo as Map<String, dynamic>;
+              if (archivoMap['alumnoId'] == widget.alumnoId) {
+                final tipo = archivoMap['tipo'] as String;
+                final fecha = archivoMap['fechaSubida'] as Timestamp?;
 
-    if (mounted) setState(() => visitas = visitasList);
+                if (!archivosUnicos.containsKey(tipo) ||
+                    (fecha != null &&
+                        (archivosUnicos[tipo]['fechaSubida'] as Timestamp)
+                                .compareTo(fecha) <
+                            0)) {
+                  archivosUnicos[tipo] = archivoMap;
+                }
+              }
+            }
+
+            return {
+              'id': doc.id,
+              'titulo': data['titulo'] as String? ?? 'Sin título',
+              'empresa': data['empresa'] as String? ?? 'Sin empresa',
+              'fecha_hora': (data['fecha_hora'] as Timestamp?)?.toDate(),
+              'profesor': data['profesor'] as String? ?? 'No asignado',
+              'archivos_pendientes': archivosUnicos.values.toList(),
+            };
+          }).toList();
+
+      if (mounted) {
+        setState(() => visitas = visitasList);
+      }
+    } catch (e) {
+      _mostrarError('Error al cargar visitas: $e');
+    }
   }
 
-  void _navegarASubirArchivo(String visitaId) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder:
-            (context) => SubirArchivoScreen(
-              visitaId: visitaId,
-              alumnoId: widget.alumnoId,
-              onArchivoSubido: _cargarDatos,
-            ),
-      ),
-    );
+  Color _getEstadoColor(String? estado) {
+    switch (estado) {
+      case 'aprobado':
+        return Colors.green;
+      case 'rechazado':
+        return Colors.red;
+      default:
+        return Colors.orange;
+    }
   }
 
-  void _mostrarError(String mensaje) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(mensaje),
-        backgroundColor: Colors.red,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      ),
-    );
+  String _getNombreLegible(String tipo) {
+    switch (tipo) {
+      case 'CURP':
+        return 'CURP';
+      case 'INE_Tutor':
+        return 'INE del Tutor';
+      case 'Constancia_Medica':
+        return 'Constancia Médica';
+      default:
+        return tipo.replaceAll('_', ' ');
+    }
   }
 
   PreferredSizeWidget _buildAppBar() {
     return AppBar(
       title: LayoutBuilder(
         builder: (context, constraints) {
-          // Mostrar solo el icono y nombre en pantallas pequeñas
-          if (constraints.maxWidth < 400) {
-            return Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.school, color: Colors.white, size: 24),
-                SizedBox(width: 8),
-                Text(
-                  'Visitas',
-                  style: GoogleFonts.poppins(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 18,
+          return constraints.maxWidth < 400
+              ? Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.school, color: Colors.white, size: 24),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Visitas',
+                    style: GoogleFonts.poppins(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 18,
+                    ),
                   ),
+                ],
+              )
+              : Text(
+                'Visitas Escolares',
+                style: GoogleFonts.poppins(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 20,
                 ),
-              ],
-            );
-          }
-          // Mostrar título completo en pantallas más grandes
-          return Text(
-            'Visitas Escolares',
-            style: GoogleFonts.poppins(
-              color: Colors.white,
-              fontWeight: FontWeight.w600,
-              fontSize: 20,
-            ),
-          );
+              );
         },
       ),
       actions: [
-        // Nombre del usuario con diseño adaptable
         LayoutBuilder(
           builder: (context, constraints) {
-            final showFullName = constraints.maxWidth > 350;
             return Padding(
               padding: const EdgeInsets.symmetric(horizontal: 8.0),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Icon(Icons.person, color: Colors.amber[200], size: 20),
-                  if (showFullName) ...[
-                    SizedBox(width: 4),
+                  if (constraints.maxWidth > 350) ...[
+                    const SizedBox(width: 4),
                     Flexible(
                       child: Text(
                         alumnoNombre ?? "Alumno",
@@ -170,6 +186,7 @@ class _AlumnoScreenState extends State<AlumnoScreen> {
                           fontWeight: FontWeight.w500,
                         ),
                         maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
                   ],
@@ -179,7 +196,7 @@ class _AlumnoScreenState extends State<AlumnoScreen> {
           },
         ),
         IconButton(
-          icon: Icon(Icons.logout, size: 22),
+          icon: const Icon(Icons.logout, size: 22),
           onPressed: _logout,
           tooltip: 'Cerrar sesión',
           color: Colors.white,
@@ -194,157 +211,6 @@ class _AlumnoScreenState extends State<AlumnoScreen> {
             colors: [Color(0xFF4C60AF), Color.fromARGB(255, 37, 195, 248)],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildVisitaCard(Map<String, dynamic> visita) {
-    final fechaHora = visita['fecha_hora'] as DateTime?;
-    final archivosPendientes = visita['archivos_pendientes'] as List<dynamic>;
-
-    return Card(
-      elevation: 3,
-      margin: const EdgeInsets.symmetric(vertical: 8),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => DetalleVisitaScreen(visitaId: visita['id']),
-            ),
-          );
-        },
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Expanded(
-                    child: Text(
-                      visita['titulo'] ?? 'Sin título',
-                      style: GoogleFonts.poppins(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.blue[800],
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  if (archivosPendientes.isNotEmpty)
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.orange.withOpacity(0.2),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Text(
-                        '${archivosPendientes.length} archivo(s)',
-                        style: GoogleFonts.roboto(
-                          color: Colors.orange[800],
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              _buildInfoRow(Icons.business, visita['empresa'] ?? 'Sin empresa'),
-              _buildInfoRow(
-                Icons.person,
-                'Profesor: ${visita['profesor'] ?? 'No asignado'}',
-              ),
-              if (fechaHora != null)
-                _buildInfoRow(
-                  Icons.calendar_today,
-                  DateFormat('dd/MM/yyyy - HH:mm').format(fechaHora),
-                ),
-              const SizedBox(height: 12),
-              if (archivosPendientes.isNotEmpty) ...[
-                Text(
-                  'Archivos pendientes:',
-                  style: GoogleFonts.roboto(
-                    fontWeight: FontWeight.w500,
-                    color: Colors.grey[700],
-                  ),
-                ),
-                const SizedBox(height: 4),
-                ...archivosPendientes.map<Widget>((archivo) {
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 4),
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.insert_drive_file,
-                          size: 16,
-                          color: _getEstadoColor(archivo['estado']),
-                        ),
-                        Expanded(
-                          child: Text(
-                            archivo['nombre'] ?? 'Sin nombre',
-                            style: GoogleFonts.roboto(
-                              fontSize: 14,
-                              color: Colors.grey[800],
-                            ),
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: _getEstadoColor(
-                              archivo['estado'],
-                            ).withOpacity(0.2),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Text(
-                            archivo['estado'] ?? 'pendiente',
-                            style: GoogleFonts.roboto(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w500,
-                              color: _getEstadoColor(archivo['estado']),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                }),
-              ],
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () => _navegarASubirArchivo(visita['id']),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blue,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  child: Text(
-                    'Subir archivo',
-                    style: GoogleFonts.roboto(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ),
-              ),
-            ],
           ),
         ),
       ),
@@ -369,15 +235,190 @@ class _AlumnoScreenState extends State<AlumnoScreen> {
     );
   }
 
-  Color _getEstadoColor(String? estado) {
-    switch (estado) {
-      case 'aprobado':
-        return Colors.green;
-      case 'rechazado':
-        return Colors.red;
-      default:
-        return Colors.orange;
-    }
+  Widget _buildVisitaCard(Map<String, dynamic> visita) {
+    final fechaHora = visita['fecha_hora'] as DateTime?;
+    final archivosPendientes = visita['archivos_pendientes'] as List<dynamic>;
+
+    return Card(
+      elevation: 3,
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder:
+                  (context) =>
+                      DetalleVisitaScreen(visitaId: visita['id'] as String),
+            ),
+          );
+        },
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(
+                    child: Text(
+                      visita['titulo'] as String? ?? 'Sin título',
+                      style: GoogleFonts.poppins(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.blue[800],
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  if (archivosPendientes.isNotEmpty)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        '${archivosPendientes.length} documento(s)',
+                        style: GoogleFonts.roboto(
+                          color: Colors.orange[800],
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              _buildInfoRow(
+                Icons.business,
+                visita['empresa'] as String? ?? 'Sin empresa',
+              ),
+              _buildInfoRow(
+                Icons.person,
+                'Profesor: ${visita['profesor'] as String? ?? 'No asignado'}',
+              ),
+              if (fechaHora != null)
+                _buildInfoRow(
+                  Icons.calendar_today,
+                  DateFormat('dd/MM/yyyy - HH:mm').format(fechaHora),
+                ),
+              const SizedBox(height: 12),
+              if (archivosPendientes.isNotEmpty) ...[
+                Text(
+                  'Documentos requeridos:',
+                  style: GoogleFonts.roboto(
+                    fontWeight: FontWeight.w500,
+                    color: Colors.grey[700],
+                  ),
+                ),
+                const SizedBox(height: 4),
+                ...archivosPendientes.map<Widget>((archivo) {
+                  final archivoMap = archivo as Map<String, dynamic>;
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.insert_drive_file,
+                          size: 16,
+                          color: _getEstadoColor(
+                            archivoMap['estado'] as String?,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            _getNombreLegible(
+                              archivoMap['tipo'] as String? ?? 'documento',
+                            ),
+                            style: GoogleFonts.roboto(
+                              fontSize: 14,
+                              color: Colors.grey[800],
+                            ),
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: _getEstadoColor(
+                              archivoMap['estado'] as String?,
+                            ).withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            archivoMap['estado'] as String? ?? 'pendiente',
+                            style: GoogleFonts.roboto(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                              color: _getEstadoColor(
+                                archivoMap['estado'] as String?,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }),
+              ],
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed:
+                      () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder:
+                              (context) => SubirArchivoScreen(
+                                visitaId: visita['id'] as String,
+                                alumnoId: widget.alumnoId,
+                                onArchivoSubido: _cargarDatos,
+                              ),
+                        ),
+                      ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: Text(
+                    'Subir documento',
+                    style: GoogleFonts.roboto(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _mostrarError(String mensaje) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(mensaje),
+        backgroundColor: Colors.red,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    );
   }
 
   @override
