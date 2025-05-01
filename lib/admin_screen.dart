@@ -18,15 +18,98 @@ class AdminScreen extends StatefulWidget {
 
 class _AdminScreenState extends State<AdminScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final ScrollController _scrollController = ScrollController();
+
+  // Pagination variables
+  int _limit = 10;
+  bool _hasMore = true;
+  bool _isLoadingMore = false;
+  List<DocumentSnapshot> _loadedDocuments = [];
+
+  // Admin data
   String _adminName = "Administrador";
   bool _isLoading = true;
 
   @override
   void initState() {
     super.initState();
+    _scrollController.addListener(_scrollListener);
     _loadAdminData();
   }
 
+  @override
+  void dispose() {
+    _scrollController.removeListener(_scrollListener);
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  // ========== CONFIRMATION DIALOGS ==========
+  Future<bool> _showConfirmationDialog({
+    required String title,
+    required String content,
+    String confirmText = "Confirmar",
+    Color confirmColor = Colors.red,
+  }) async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            title: Text(title),
+            content: Text(content),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text("Cancelar"),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: Text(confirmText, style: TextStyle(color: confirmColor)),
+              ),
+            ],
+          ),
+    );
+    return result ?? false;
+  }
+
+  Future<void> _confirmLogout() async {
+    final confirm = await _showConfirmationDialog(
+      title: "Cerrar sesión",
+      content: "¿Estás seguro de que deseas salir de la aplicación?",
+      confirmText: "Salir",
+    );
+
+    if (confirm) {
+      await _logout();
+    }
+  }
+
+  // ========== PAGINATION METHODS ==========
+  void _scrollListener() {
+    if (_scrollController.offset >=
+            _scrollController.position.maxScrollExtent &&
+        !_scrollController.position.outOfRange) {
+      if (!_isLoadingMore && _hasMore) {
+        _loadMoreVisitas();
+      }
+    }
+  }
+
+  Future<void> _loadMoreVisitas() async {
+    if (!_hasMore || _isLoadingMore) return;
+
+    setState(() => _isLoadingMore = true);
+
+    try {
+      setState(() => _limit += 10);
+    } catch (e) {
+      _mostrarError("Error al cargar más visitas: $e");
+    } finally {
+      setState(() => _isLoadingMore = false);
+    }
+  }
+
+  // ========== CORE FUNCTIONALITY ==========
   Future<void> _loadAdminData() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -54,23 +137,41 @@ class _AdminScreenState extends State<AdminScreen> {
   }
 
   Future<void> _eliminarVisita(String visitaId) async {
-    try {
-      await _firestore.collection("visitas_escolares").doc(visitaId).delete();
-      _mostrarExito("Visita eliminada correctamente");
-    } catch (e) {
-      _mostrarError("Error al eliminar visita: $e");
+    final confirm = await _showConfirmationDialog(
+      title: "Eliminar visita",
+      content: "Esta acción no se puede deshacer. ¿Deseas continuar?",
+      confirmText: "Eliminar",
+    );
+
+    if (confirm) {
+      try {
+        await _firestore.collection("visitas_escolares").doc(visitaId).delete();
+        _mostrarExito("Visita eliminada correctamente");
+      } catch (e) {
+        _mostrarError("Error al eliminar visita: $e");
+      }
     }
   }
 
-  void _editarVisita(DocumentSnapshot visita) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => CrearVisitaScreen(visita: visita),
-      ),
+  Future<void> _editarVisita(DocumentSnapshot visita) async {
+    final confirm = await _showConfirmationDialog(
+      title: "Editar visita",
+      content: "¿Deseas editar esta visita?",
+      confirmText: "Editar",
+      confirmColor: Colors.blue,
     );
+
+    if (confirm) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => CrearVisitaScreen(visita: visita),
+        ),
+      );
+    }
   }
 
+  // ========== HELPER METHODS ==========
   Future<List<String>> _obtenerNombresAlumnos(List<dynamic> alumnosIds) async {
     List<String> nombres = [];
     for (String id in alumnosIds) {
@@ -104,6 +205,7 @@ class _AdminScreenState extends State<AdminScreen> {
     );
   }
 
+  // ========== UI COMPONENTS ==========
   PreferredSizeWidget _buildAppBar() {
     return AppBar(
       title: LayoutBuilder(
@@ -113,7 +215,7 @@ class _AdminScreenState extends State<AdminScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Icon(Icons.school, color: Colors.white, size: 24),
-                SizedBox(width: 8),
+                const SizedBox(width: 8),
                 Text(
                   'Visitas',
                   style: GoogleFonts.poppins(
@@ -146,7 +248,7 @@ class _AdminScreenState extends State<AdminScreen> {
                 children: [
                   Icon(Icons.person, color: Colors.amber[200], size: 20),
                   if (showFullName) ...[
-                    SizedBox(width: 4),
+                    const SizedBox(width: 4),
                     Flexible(
                       child: Text(
                         _adminName,
@@ -165,8 +267,8 @@ class _AdminScreenState extends State<AdminScreen> {
           },
         ),
         IconButton(
-          icon: Icon(Icons.logout, size: 22),
-          onPressed: _logout,
+          icon: const Icon(Icons.logout, size: 22),
+          onPressed: _confirmLogout, // Changed to use confirmation dialog
           tooltip: 'Cerrar sesión',
           color: Colors.white,
         ),
@@ -236,16 +338,7 @@ class _AdminScreenState extends State<AdminScreen> {
                       children: [
                         IconButton(
                           icon: Icon(Icons.folder_open, color: Colors.orange),
-                          onPressed:
-                              () => Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder:
-                                      (context) => AprobarArchivosScreen(
-                                        visitaId: doc.id,
-                                      ),
-                                ),
-                              ),
+                          onPressed: () => _confirmOpenFiles(doc.id),
                           tooltip: 'Revisar Archivos',
                         ),
                         IconButton(
@@ -289,6 +382,24 @@ class _AdminScreenState extends State<AdminScreen> {
     );
   }
 
+  Future<void> _confirmOpenFiles(String visitaId) async {
+    final confirm = await _showConfirmationDialog(
+      title: "Revisar archivos",
+      content: "¿Deseas revisar los archivos de esta visita?",
+      confirmText: "Abrir",
+      confirmColor: Colors.orange,
+    );
+
+    if (confirm) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => AprobarArchivosScreen(visitaId: visitaId),
+        ),
+      );
+    }
+  }
+
   Widget _buildInfoRow(IconData icon, String text) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
@@ -323,11 +434,57 @@ class _AdminScreenState extends State<AdminScreen> {
     );
   }
 
+  Widget _buildPaginatedVisitasList() {
+    return StreamBuilder<QuerySnapshot>(
+      stream:
+          _firestore
+              .collection("visitas_escolares")
+              .orderBy("fecha_creacion", descending: true)
+              .limit(_limit)
+              .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting &&
+            _loadedDocuments.isEmpty) {
+          return const Center(child: CircularProgressIndicator());
+        }
+
+        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+          return _buildEmptyState();
+        }
+
+        _loadedDocuments = snapshot.data!.docs;
+
+        if (snapshot.data!.docs.length < _limit) {
+          _hasMore = false;
+        }
+
+        return Column(
+          children: [
+            ...snapshot.data!.docs.map((doc) => _buildVisitaCard(doc)),
+            if (_isLoadingMore)
+              const Padding(
+                padding: EdgeInsets.all(16.0),
+                child: CircularProgressIndicator(),
+              ),
+            if (!_hasMore && snapshot.data!.docs.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Text(
+                  'No hay más visitas para mostrar',
+                  style: GoogleFonts.roboto(
+                    color: Colors.grey,
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.of(context).size;
-    final isMobile = size.width < 600;
-
     return Scaffold(
       appBar: _buildAppBar(),
       body:
@@ -351,35 +508,9 @@ class _AdminScreenState extends State<AdminScreen> {
                     ),
                   ),
                   Expanded(
-                    child: StreamBuilder<QuerySnapshot>(
-                      stream:
-                          _firestore
-                              .collection("visitas_escolares")
-                              .orderBy("fecha_creacion", descending: true)
-                              .snapshots(),
-                      builder: (context, snapshot) {
-                        if (snapshot.connectionState ==
-                            ConnectionState.waiting) {
-                          return const Center(
-                            child: CircularProgressIndicator(),
-                          );
-                        }
-                        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                          return _buildEmptyState();
-                        }
-                        return SingleChildScrollView(
-                          padding: EdgeInsets.symmetric(
-                            horizontal: isMobile ? 8 : 24,
-                            vertical: 16,
-                          ),
-                          child: Column(
-                            children:
-                                snapshot.data!.docs
-                                    .map((doc) => _buildVisitaCard(doc))
-                                    .toList(),
-                          ),
-                        );
-                      },
+                    child: SingleChildScrollView(
+                      controller: _scrollController,
+                      child: _buildPaginatedVisitasList(),
                     ),
                   ),
                   Padding(

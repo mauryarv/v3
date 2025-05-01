@@ -28,14 +28,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool _obscureAnswer = true;
   bool _isLoading = false;
 
-  // Estados para validación de contraseña
+  // Password validation states
   bool _hasMinLength = false;
   bool _hasUpperCase = false;
   bool _hasLowerCase = false;
   bool _hasNumberChar = false;
   bool _hasSpecialChar = false;
 
-  // Estados para validación de número
+  // Number validation states
   bool _hasValidLength = false;
   bool _isProfessorLength = false;
   bool _isStudentLength = false;
@@ -53,6 +53,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
     _numberController.addListener(_validateNumber);
     _passwordController.addListener(_validatePassword);
     _answerController.addListener(_validateAnswer);
+  }
+
+  @override
+  void dispose() {
+    _numberController.dispose();
+    _passwordController.dispose();
+    _answerController.dispose();
+    super.dispose();
   }
 
   void _validateNumber() {
@@ -91,80 +99,80 @@ class _RegisterScreenState extends State<RegisterScreen> {
     });
   }
 
+  void _showErrorSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        margin: EdgeInsets.only(
+          bottom: MediaQuery.of(context).size.height - 150,
+          left: 20,
+          right: 20,
+        ),
+      ),
+    );
+  }
+
+  void _showSuccessSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.green,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        margin: EdgeInsets.only(
+          bottom: MediaQuery.of(context).size.height - 150,
+          left: 20,
+          right: 20,
+        ),
+      ),
+    );
+  }
+
   Future<void> register() async {
-    // Validar campos vacíos primero
-    List<String> missingFields = [];
-
-    if (_numberController.text.isEmpty) {
-      missingFields.add("Número de boleta/trabajador");
-    }
-
-    if (_passwordController.text.isEmpty) {
-      missingFields.add("Contraseña");
-    }
-
-    if (_answerController.text.isEmpty) {
-      missingFields.add("Respuesta de seguridad");
-    }
-
-    if (missingFields.isNotEmpty) {
-      String message = "Por favor complete los siguientes campos:\n";
-      message += missingFields.map((field) => "• $field").join("\n");
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(message),
-          duration: const Duration(seconds: 3),
-          backgroundColor: Colors.red,
-        ),
-      );
+    // Validate empty fields first
+    if (_numberController.text.isEmpty ||
+        _passwordController.text.isEmpty ||
+        _answerController.text.isEmpty) {
+      _showErrorSnackBar('Por favor completa todos los campos');
       return;
     }
 
-    // Validar formato de campos
-    List<String> invalidFields = [];
+    // Validate field formats
+    if (!_isNumberValid || !_isPasswordValid || !_isAnswerValid) {
+      String errorMessage = 'Por favor corrige los siguientes errores:\n';
 
-    if (!_isNumberValid) {
-      if (!_isNumberNumeric) {
-        invalidFields.add(
-          "El número de boleta/trabajador solo debe contener dígitos",
-        );
+      if (!_isNumberValid) {
+        if (!_isNumberNumeric) {
+          errorMessage += '• El número solo debe contener dígitos\n';
+        }
+        if (!_hasValidLength) {
+          errorMessage +=
+              '• El número debe tener 7 (profesor) o 10 (alumno) dígitos\n';
+        }
       }
-      if (!_hasValidLength) {
-        invalidFields.add(
-          "El número debe tener 7 dígitos (profesor) o 10 dígitos (alumno)",
-        );
+
+      if (!_isPasswordValid) {
+        errorMessage += '• La contraseña no cumple con los requisitos:\n';
+        if (!_hasMinLength) errorMessage += '  - Mínimo 8 caracteres\n';
+        if (!_hasUpperCase) errorMessage += '  - Al menos una mayúscula\n';
+        if (!_hasLowerCase) errorMessage += '  - Al menos una minúscula\n';
+        if (!_hasNumberChar) errorMessage += '  - Al menos un número\n';
+        if (!_hasSpecialChar) {
+          errorMessage += '  - Al menos un carácter especial\n';
+        }
       }
-    }
 
-    if (!_isPasswordValid) {
-      List<String> passwordErrors = [];
-      if (!_hasMinLength) passwordErrors.add("mínimo 8 caracteres");
-      if (!_hasUpperCase) passwordErrors.add("una mayúscula");
-      if (!_hasLowerCase) passwordErrors.add("una minúscula");
-      if (!_hasNumberChar) passwordErrors.add("un número");
-      if (!_hasSpecialChar) passwordErrors.add("un carácter especial");
+      if (!_isAnswerValid) {
+        errorMessage += '• La respuesta de seguridad no puede estar vacía\n';
+      }
 
-      invalidFields.add(
-        "La contraseña debe tener: ${passwordErrors.join(', ')}",
-      );
-    }
-
-    if (invalidFields.isNotEmpty) {
-      String message = "Corrija los siguientes errores:\n";
-      message += invalidFields.map((error) => "• $error").join("\n");
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(message),
-          duration: const Duration(seconds: 4),
-          backgroundColor: Colors.orange,
-        ),
-      );
+      _showErrorSnackBar(errorMessage);
       return;
     }
 
-    // Proceso de registro
     setState(() {
       _isLoading = true;
     });
@@ -178,12 +186,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
           await _firestore.collection("usuarios").doc(number).get();
 
       if (docSnapshot.exists) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("El usuario ya está registrado"),
-            backgroundColor: Colors.red,
-          ),
-        );
+        _showErrorSnackBar('El número $number ya está registrado');
         return;
       }
 
@@ -198,25 +201,28 @@ class _RegisterScreenState extends State<RegisterScreen> {
         "rol": _isStudentLength ? "alumno" : "profesor",
       });
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Registro exitoso"),
-          backgroundColor: Colors.green,
-        ),
-      );
+      _showSuccessSnackBar('¡Registro exitoso! Redirigiendo...');
 
       Navigator.pushAndRemoveUntil(
         context,
         MaterialPageRoute(builder: (context) => const LoginScreen()),
         (Route<dynamic> route) => false,
       );
+    } on FirebaseException catch (e) {
+      String errorMessage = 'Error de Firebase: ';
+      switch (e.code) {
+        case 'permission-denied':
+          errorMessage += 'No tienes permiso para realizar esta acción';
+          break;
+        case 'unavailable':
+          errorMessage += 'Servicio no disponible. Intenta más tarde';
+          break;
+        default:
+          errorMessage += e.message ?? 'Error desconocido';
+      }
+      _showErrorSnackBar(errorMessage);
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text("Error al registrar usuario: $e"),
-          backgroundColor: Colors.red,
-        ),
-      );
+      _showErrorSnackBar('Error inesperado: ${e.toString()}');
     } finally {
       if (mounted) {
         setState(() {
@@ -240,6 +246,204 @@ class _RegisterScreenState extends State<RegisterScreen> {
               ),
             ],
           ),
+    );
+  }
+
+  Widget _buildNumberField(bool isSmallScreen) {
+    return TextField(
+      controller: _numberController,
+      keyboardType: TextInputType.number,
+      maxLength: 10,
+      decoration: InputDecoration(
+        counterText: "",
+        hintText: "P.ej. 1234567 o 1234567890",
+        labelText: "Boleta/Trabajador",
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+        prefixIcon: const Icon(Icons.numbers),
+        suffixIcon:
+            _numberController.text.isEmpty
+                ? null
+                : IconButton(
+                  icon: Icon(
+                    _isNumberValid ? Icons.check_circle : Icons.error,
+                    color: _isNumberValid ? Colors.green : Colors.red,
+                  ),
+                  onPressed: null,
+                ),
+        errorText:
+            _numberController.text.isNotEmpty && !_isNumberValid
+                ? !_isNumberNumeric
+                    ? "Solo se permiten números"
+                    : !_hasValidLength
+                    ? "Debe tener 7 (profesor) o 10 (alumno) dígitos"
+                    : null
+                : null,
+      ),
+    );
+  }
+
+  Widget _buildPasswordField(bool isSmallScreen) {
+    return TextField(
+      controller: _passwordController,
+      obscureText: _obscurePassword,
+      decoration: InputDecoration(
+        hintText: "P.ej. Admin1@",
+        labelText: "Contraseña",
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+        prefixIcon: const Icon(Icons.password),
+        suffixIcon: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              icon: Icon(
+                _obscurePassword ? Icons.visibility : Icons.visibility_off,
+              ),
+              onPressed:
+                  () => setState(() => _obscurePassword = !_obscurePassword),
+            ),
+            if (_passwordController.text.isNotEmpty)
+              IconButton(
+                icon: Icon(
+                  _isPasswordValid ? Icons.check_circle : Icons.error,
+                  color: _isPasswordValid ? Colors.green : Colors.red,
+                ),
+                onPressed: null,
+              ),
+          ],
+        ),
+        errorText:
+            _passwordController.text.isNotEmpty && !_isPasswordValid
+                ? "La contraseña no cumple con los requisitos"
+                : null,
+      ),
+    );
+  }
+
+  Widget _buildAnswerField(bool isSmallScreen) {
+    return TextField(
+      controller: _answerController,
+      obscureText: _obscureAnswer,
+      decoration: InputDecoration(
+        labelText: "Respuesta de seguridad",
+        hintText: "P.ej. Firulais",
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+        prefixIcon: const Icon(Icons.lock_outline),
+        suffixIcon: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              icon: Icon(
+                _obscureAnswer ? Icons.visibility : Icons.visibility_off,
+              ),
+              onPressed: () => setState(() => _obscureAnswer = !_obscureAnswer),
+            ),
+            if (_answerController.text.isNotEmpty)
+              IconButton(
+                icon: Icon(
+                  _isAnswerValid ? Icons.check_circle : Icons.error,
+                  color: _isAnswerValid ? Colors.green : Colors.red,
+                ),
+                onPressed: null,
+              ),
+          ],
+        ),
+        errorText:
+            _answerController.text.isEmpty && _answerController.text.isNotEmpty
+                ? "Por favor ingresa una respuesta"
+                : null,
+      ),
+    );
+  }
+
+  Widget _buildDropdownField(bool isSmallScreen) {
+    return DropdownButtonFormField<String>(
+      value: _selectedQuestion,
+      items:
+          _securityQuestions
+              .map(
+                (q) => DropdownMenuItem(
+                  value: q,
+                  child: Text(
+                    q,
+                    style: TextStyle(fontSize: isSmallScreen ? 14 : 16),
+                  ),
+                ),
+              )
+              .toList(),
+      onChanged: (value) => setState(() => _selectedQuestion = value!),
+      decoration: InputDecoration(
+        labelText: "Pregunta de seguridad",
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+        prefixIcon: const Icon(Icons.security),
+      ),
+    );
+  }
+
+  Widget _buildNumberRequirements(double iconSize) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildValidationRow("Solo números (0-9)", _isNumberNumeric, iconSize),
+        _buildValidationRow(
+          "7 dígitos (profesor) o 10 dígitos (alumno)",
+          _hasValidLength,
+          iconSize,
+        ),
+        if (_hasValidLength)
+          Padding(
+            padding: const EdgeInsets.only(left: 24.0, top: 4),
+            child: Text(
+              _isProfessorLength
+                  ? "Registrando como profesor"
+                  : "Registrando como alumno",
+              style: TextStyle(
+                color: Colors.blue,
+                fontSize: iconSize - 2,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildPasswordRequirements(double iconSize) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildValidationRow("Mínimo 8 caracteres", _hasMinLength, iconSize),
+        _buildValidationRow("Al menos una mayúscula", _hasUpperCase, iconSize),
+        _buildValidationRow("Al menos una minúscula", _hasLowerCase, iconSize),
+        _buildValidationRow("Al menos un número", _hasNumberChar, iconSize),
+        _buildValidationRow(
+          "Al menos un carácter especial (!@#\$%^&*)",
+          _hasSpecialChar,
+          iconSize,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildValidationRow(String text, bool isValid, double iconSize) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4.0),
+      child: Row(
+        children: [
+          Icon(
+            isValid ? Icons.check_circle : Icons.error,
+            color: isValid ? Colors.green : Colors.grey,
+            size: iconSize,
+          ),
+          const SizedBox(width: 8),
+          Text(
+            text,
+            style: TextStyle(
+              color: isValid ? Colors.green : Colors.grey,
+              fontSize: iconSize - 2,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -377,188 +581,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
             ],
           ),
         ),
-      ),
-    );
-  }
-
-  Widget _buildNumberField(bool isSmallScreen) {
-    return TextField(
-      controller: _numberController,
-      keyboardType: TextInputType.number,
-      maxLength: 10,
-      decoration: InputDecoration(
-        counterText: "",
-        hintText: "P.ej. 1234567 o 1234567890",
-        labelText: "Boleta/Trabajador",
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-        prefixIcon: const Icon(Icons.numbers),
-        suffixIcon:
-            _numberController.text.isEmpty
-                ? null
-                : IconButton(
-                  icon: Icon(
-                    _isNumberValid ? Icons.check_circle : Icons.error,
-                    color: _isNumberValid ? Colors.green : Colors.red,
-                  ),
-                  onPressed: null,
-                ),
-      ),
-    );
-  }
-
-  Widget _buildNumberRequirements(double iconSize) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildValidationRow("Solo números (0-9)", _isNumberNumeric, iconSize),
-        _buildValidationRow(
-          "7 dígitos (profesor) o 10 dígitos (alumno)",
-          _hasValidLength,
-          iconSize,
-        ),
-        if (_hasValidLength)
-          Padding(
-            padding: const EdgeInsets.only(left: 24.0, top: 4),
-            child: Text(
-              _isProfessorLength
-                  ? "Registrando como profesor"
-                  : "Registrando como alumno",
-              style: TextStyle(
-                color: Colors.blue,
-                fontSize: iconSize - 2,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-      ],
-    );
-  }
-
-  Widget _buildPasswordField(bool isSmallScreen) {
-    return TextField(
-      controller: _passwordController,
-      obscureText: _obscurePassword,
-      decoration: InputDecoration(
-        hintText: "P.ej. Admin1@",
-        labelText: "Contraseña",
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-        prefixIcon: const Icon(Icons.password),
-        suffixIcon: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            IconButton(
-              icon: Icon(
-                _obscurePassword ? Icons.visibility : Icons.visibility_off,
-              ),
-              onPressed:
-                  () => setState(() => _obscurePassword = !_obscurePassword),
-            ),
-            if (_passwordController.text.isNotEmpty)
-              IconButton(
-                icon: Icon(
-                  _isPasswordValid ? Icons.check_circle : Icons.error,
-                  color: _isPasswordValid ? Colors.green : Colors.red,
-                ),
-                onPressed: null,
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildPasswordRequirements(double iconSize) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildValidationRow("Mínimo 8 caracteres", _hasMinLength, iconSize),
-        _buildValidationRow("Al menos una mayúscula", _hasUpperCase, iconSize),
-        _buildValidationRow("Al menos una minúscula", _hasLowerCase, iconSize),
-        _buildValidationRow("Al menos un número", _hasNumberChar, iconSize),
-        _buildValidationRow(
-          "Al menos un carácter especial (!@#\$%^&*)",
-          _hasSpecialChar,
-          iconSize,
-        ),
-      ],
-    );
-  }
-
-  Widget _buildDropdownField(bool isSmallScreen) {
-    return DropdownButtonFormField<String>(
-      value: _selectedQuestion,
-      items:
-          _securityQuestions
-              .map(
-                (q) => DropdownMenuItem(
-                  value: q,
-                  child: Text(
-                    q,
-                    style: TextStyle(fontSize: isSmallScreen ? 14 : 16),
-                  ),
-                ),
-              )
-              .toList(),
-      onChanged: (value) => setState(() => _selectedQuestion = value!),
-      decoration: InputDecoration(
-        labelText: "Pregunta de seguridad",
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-        prefixIcon: const Icon(Icons.security),
-      ),
-    );
-  }
-
-  Widget _buildAnswerField(bool isSmallScreen) {
-    return TextField(
-      controller: _answerController,
-      obscureText: _obscureAnswer,
-      decoration: InputDecoration(
-        labelText: "Respuesta de seguridad",
-        hintText: "P.ej. Firulais",
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-        prefixIcon: const Icon(Icons.lock_outline),
-        suffixIcon: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            IconButton(
-              icon: Icon(
-                _obscureAnswer ? Icons.visibility : Icons.visibility_off,
-              ),
-              onPressed: () => setState(() => _obscureAnswer = !_obscureAnswer),
-            ),
-            if (_answerController.text.isNotEmpty)
-              IconButton(
-                icon: Icon(
-                  _isAnswerValid ? Icons.check_circle : Icons.error,
-                  color: _isAnswerValid ? Colors.green : Colors.red,
-                ),
-                onPressed: null,
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildValidationRow(String text, bool isValid, double iconSize) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4.0),
-      child: Row(
-        children: [
-          Icon(
-            isValid ? Icons.check_circle : Icons.error,
-            color: isValid ? Colors.green : Colors.grey,
-            size: iconSize,
-          ),
-          const SizedBox(width: 8),
-          Text(
-            text,
-            style: TextStyle(
-              color: isValid ? Colors.green : Colors.grey,
-              fontSize: iconSize - 2,
-            ),
-          ),
-        ],
       ),
     );
   }

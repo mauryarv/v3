@@ -27,8 +27,11 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _isLoading = false;
   bool _isNumberValid = false;
   bool _isPasswordValid = false;
+  bool _showPasswordRequirements = false;
+  String? _numberError;
+  String? _passwordError;
 
-  // Estados para validación de contraseña
+  // States for password validation
   bool _hasMinLength = false;
   bool _hasUpperCase = false;
   bool _hasLowerCase = false;
@@ -53,6 +56,16 @@ class _LoginScreenState extends State<LoginScreen> {
     final number = _numberController.text.trim();
     setState(() {
       _isNumberValid = number.length == 7 || number.length == 10;
+      if (number.isEmpty) {
+        _numberError = null;
+      } else if (!_isNumberValid) {
+        _numberError =
+            number.length < 7
+                ? "El número es demasiado corto"
+                : "El número debe tener 7 dígitos (profesor) o 10 dígitos (alumno)";
+      } else {
+        _numberError = null;
+      }
     });
   }
 
@@ -70,6 +83,14 @@ class _LoginScreenState extends State<LoginScreen> {
           _hasLowerCase &&
           _hasNumber &&
           _hasSpecialChar;
+
+      if (password.isEmpty) {
+        _passwordError = null;
+      } else if (!_isPasswordValid) {
+        _passwordError = "La contraseña no cumple con los requisitos";
+      } else {
+        _passwordError = null;
+      }
     });
   }
 
@@ -79,45 +100,66 @@ class _LoginScreenState extends State<LoginScreen> {
     });
   }
 
+  Future<void> _showErrorDialog(String title, String message) async {
+    return showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text(title),
+          content: SingleChildScrollView(
+            child: ListBody(children: <Widget>[Text(message)]),
+          ),
+          actions: <Widget>[
+            TextButton(
+              child: const Text('OK'),
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Future<void> login() async {
     String number = _numberController.text.trim();
     String password = _passwordController.text.trim();
 
-    // Validar campos vacíos
-    if (number.isEmpty || password.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Por favor ingrese número y contraseña"),
-          backgroundColor: Colors.red,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+    // Reset errors
+    setState(() {
+      _numberError = null;
+      _passwordError = null;
+    });
+
+    // Validate fields
+    if (number.isEmpty) {
+      setState(() {
+        _numberError = "Por favor ingrese su número de identificación";
+      });
       return;
     }
 
-    // Validar formato de número
+    if (password.isEmpty) {
+      setState(() {
+        _passwordError = "Por favor ingrese su contraseña";
+      });
+      return;
+    }
+
     if (!_isNumberValid) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            "El número debe tener 7 dígitos (profesor) o 10 dígitos (alumno)",
-          ),
-          backgroundColor: Colors.orange,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      setState(() {
+        _numberError =
+            "El número debe tener 7 dígitos (profesor) o 10 dígitos (alumno)";
+      });
       return;
     }
 
-    // Validar contraseña
     if (!_isPasswordValid) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("La contraseña no cumple con los requisitos mínimos"),
-          backgroundColor: Colors.orange,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      setState(() {
+        _passwordError = "La contraseña no cumple con los requisitos mínimos";
+      });
       return;
     }
 
@@ -130,12 +172,9 @@ class _LoginScreenState extends State<LoginScreen> {
           await _firestore.collection("usuarios").doc(number).get();
 
       if (!userDoc.exists) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Usuario no encontrado"),
-            backgroundColor: Colors.orange,
-            behavior: SnackBarBehavior.floating,
-          ),
+        await _showErrorDialog(
+          "Usuario no encontrado",
+          "No existe una cuenta asociada a este número. Por favor verifique o regístrese.",
         );
         return;
       }
@@ -144,63 +183,53 @@ class _LoginScreenState extends State<LoginScreen> {
       String enteredPasswordHash =
           sha256.convert(utf8.encode(password)).toString();
 
-      if (storedPasswordHash == enteredPasswordHash) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Inicio de sesión exitoso"),
-            backgroundColor: Colors.green,
-            behavior: SnackBarBehavior.floating,
+      if (storedPasswordHash != enteredPasswordHash) {
+        await _showErrorDialog(
+          "Contraseña incorrecta",
+          "La contraseña ingresada no es correcta. Por favor intente nuevamente.",
+        );
+        return;
+      }
+
+      // Login successful
+      SharedPreferences prefs = await SharedPreferences.getInstance();
+      await prefs.setString('user_id', number);
+      await prefs.setString('user_role', userDoc["rol"]);
+      await prefs.setString('user_name', userDoc["nombre"]);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Inicio de sesión exitoso"),
+          backgroundColor: Colors.green,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+
+      // Navigate based on role
+      if (number.length == 10) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (context) => AlumnoScreen(alumnoId: number),
           ),
         );
-
-        SharedPreferences prefs = await SharedPreferences.getInstance();
-        await prefs.setString('user_id', number);
-        await prefs.setString('user_role', userDoc["rol"]);
-        await prefs.setString('user_name', userDoc["nombre"]);
-
-        if (number.length == 10) {
+      } else if (number.length == 7) {
+        if (userDoc["rol"] == "profesor") {
           Navigator.pushReplacement(
             context,
-            MaterialPageRoute(
-              builder: (context) => AlumnoScreen(alumnoId: number),
-            ),
+            MaterialPageRoute(builder: (context) => ProfesorScreen()),
           );
-        } else if (number.length == 7) {
-          String specificRole = userDoc["rol"];
-
-          if (specificRole == "profesor") {
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (context) => ProfesorScreen()),
-            );
-          } else if (specificRole == "administrador") {
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (context) => AdminScreen()),
-            );
-          } else {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text("Rol desconocido"),
-                backgroundColor: Colors.orange,
-              ),
-            );
-          }
+        } else if (userDoc["rol"] == "administrador") {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (context) => AdminScreen()),
+          );
         }
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Contraseña incorrecta"),
-            backgroundColor: Colors.orange,
-          ),
-        );
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text("Error al iniciar sesión: $e"),
-          backgroundColor: Colors.red,
-        ),
+      await _showErrorDialog(
+        "Error de conexión",
+        "Ocurrió un error al intentar conectarse. Por favor verifique su conexión a internet e intente nuevamente.",
       );
     } finally {
       if (mounted) {
@@ -351,6 +380,11 @@ class _LoginScreenState extends State<LoginScreen> {
                     borderRadius: BorderRadius.circular(12),
                     borderSide: const BorderSide(color: Colors.blue, width: 2),
                   ),
+                  errorText: _numberError,
+                  errorStyle: TextStyle(
+                    color: Colors.red,
+                    fontSize: isSmallScreen ? 12 : 14,
+                  ),
                   contentPadding: EdgeInsets.symmetric(
                     vertical: isSmallScreen ? 16 : 20,
                     horizontal: 16,
@@ -373,6 +407,13 @@ class _LoginScreenState extends State<LoginScreen> {
               TextField(
                 controller: _passwordController,
                 obscureText: _obscureText,
+                onTap: () {
+                  if (!_showPasswordRequirements) {
+                    setState(() {
+                      _showPasswordRequirements = true;
+                    });
+                  }
+                },
                 decoration: InputDecoration(
                   labelText: "Contraseña",
                   hintText: "Ingresa tu contraseña",
@@ -383,6 +424,11 @@ class _LoginScreenState extends State<LoginScreen> {
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
                     borderSide: const BorderSide(color: Colors.blue, width: 2),
+                  ),
+                  errorText: _passwordError,
+                  errorStyle: TextStyle(
+                    color: Colors.red,
+                    fontSize: isSmallScreen ? 12 : 14,
                   ),
                   contentPadding: EdgeInsets.symmetric(
                     vertical: isSmallScreen ? 16 : 20,
@@ -418,7 +464,8 @@ class _LoginScreenState extends State<LoginScreen> {
                 style: TextStyle(fontSize: isSmallScreen ? 16 : 18),
               ),
               SizedBox(height: isSmallScreen ? 10 : 15),
-              _buildPasswordRequirements(iconSize),
+              if (_showPasswordRequirements)
+                _buildPasswordRequirements(iconSize),
               SizedBox(height: isSmallScreen ? 30 : 40),
               SizedBox(
                 width: double.infinity,
