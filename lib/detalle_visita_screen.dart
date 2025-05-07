@@ -238,6 +238,12 @@ class _DetalleVisitaScreenState extends State<DetalleVisitaScreen> {
                       visitaDetalles!['empresa'] ?? 'Desconocida',
                       Icons.business,
                     ),
+                    // Nueva tarjeta para la ubicación
+                    _buildInfoCard(
+                      'Ubicación',
+                      visitaDetalles!['ubicacion'] ?? 'Ubicación no disponible',
+                      Icons.location_on,
+                    ),
                     _buildInfoCard(
                       'Profesor',
                       visitaDetalles!['profesor'] ?? 'No asignado',

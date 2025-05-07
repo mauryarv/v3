@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:v3/detalle_visita_screen.dart';
 import 'package:v3/login_screen.dart';
 
 class ProfesorScreen extends StatefulWidget {
@@ -20,10 +21,13 @@ class ProfesorScreen extends StatefulWidget {
 class _ProfesorScreenState extends State<ProfesorScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseStorage _storage = FirebaseStorage.instance;
+  final TextEditingController _searchController = TextEditingController();
 
   String? profesorId;
   String? profesorNombre;
   List<Map<String, dynamic>> visitas = [];
+  List<Map<String, dynamic>> _filteredVisitas = [];
+  String _searchText = '';
   bool _isLoading = true;
 
   File? _archivo;
@@ -41,6 +45,12 @@ class _ProfesorScreenState extends State<ProfesorScreen> {
   void initState() {
     super.initState();
     _cargarDatosProfesor();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   Future<void> _cargarDatosProfesor() async {
@@ -79,14 +89,42 @@ class _ProfesorScreenState extends State<ProfesorScreen> {
                 'id': doc.id,
                 'titulo': data['titulo'] ?? 'Sin título',
                 'empresa': data['empresa'] ?? 'Sin empresa',
+                'grupo': data['grupo'] ?? 'Sin grupo',
                 'fecha_hora': (data['fecha_hora'] as Timestamp?)?.toDate(),
                 'estado': data['estado'] ?? 'pendiente',
+                'ubicacion': data['ubicacion'] ?? 'Ubicación no disponible',
               };
             }).toList();
+        _filteredVisitas = List.from(visitas);
       });
     } catch (e) {
       _mostrarError('Error al cargar visitas: $e');
     }
+  }
+
+  void _filterVisitas(String query) {
+    setState(() {
+      _searchText = query.toLowerCase();
+      if (_searchText.isEmpty) {
+        _filteredVisitas = List.from(visitas);
+      } else {
+        _filteredVisitas =
+            visitas.where((visita) {
+              return visita['titulo'].toString().toLowerCase().contains(
+                    _searchText,
+                  ) ||
+                  visita['empresa'].toString().toLowerCase().contains(
+                    _searchText,
+                  ) ||
+                  visita['grupo'].toString().toLowerCase().contains(
+                    _searchText,
+                  ) ||
+                  visita['estado'].toString().toLowerCase().contains(
+                    _searchText,
+                  );
+            }).toList();
+      }
+    });
   }
 
   Future<void> _cargarDocumentosProfesor() async {
@@ -173,11 +211,9 @@ class _ProfesorScreenState extends State<ProfesorScreen> {
     try {
       setState(() => _isLoading = true);
 
-      // Eliminar de Firebase Storage
       final url = _documentosSubidos[tipoDocumento]!;
       await _storage.refFromURL(url).delete();
 
-      // Eliminar de Firestore
       final nuevosDocumentos = Map<String, String>.from(_documentosSubidos);
       nuevosDocumentos.remove(tipoDocumento);
 
@@ -185,7 +221,6 @@ class _ProfesorScreenState extends State<ProfesorScreen> {
         'documentos': nuevosDocumentos,
       });
 
-      // Actualizar estado local
       await _cargarDocumentosProfesor();
 
       _mostrarMensaje('Documento eliminado con éxito', Colors.green);
@@ -222,6 +257,15 @@ class _ProfesorScreenState extends State<ProfesorScreen> {
               ),
             ],
           ),
+    );
+  }
+
+  void _mostrarDetallesVisita(Map<String, dynamic> visita) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => DetalleVisitaScreen(visitaId: visita['id']),
+      ),
     );
   }
 
@@ -277,7 +321,7 @@ class _ProfesorScreenState extends State<ProfesorScreen> {
   PreferredSizeWidget _buildAppBar() {
     return AppBar(
       title: const Text(
-        'Visitas Escolares - Profesor',
+        'Visitas Escolares',
         style: TextStyle(color: Colors.white, fontWeight: FontWeight.w500),
       ),
       actions: [
@@ -318,45 +362,32 @@ class _ProfesorScreenState extends State<ProfesorScreen> {
   Widget _buildVisitaCard(Map<String, dynamic> visita) {
     final fechaHora = visita['fecha_hora'] as DateTime?;
 
-    return Card(
-      elevation: 3,
-      margin: const EdgeInsets.symmetric(vertical: 8),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              visita['titulo'] as String? ?? 'Sin título',
-              style: GoogleFonts.poppins(
-                fontSize: 18,
-                fontWeight: FontWeight.w600,
-                color: Colors.blue[800],
-              ),
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Icon(Icons.business, size: 16, color: Colors.grey[600]),
-                const SizedBox(width: 8),
-                Text(
-                  visita['empresa'] as String? ?? 'Sin empresa',
-                  style: GoogleFonts.roboto(
-                    fontSize: 14,
-                    color: Colors.grey[800],
-                  ),
+    return InkWell(
+      onTap: () => _mostrarDetallesVisita(visita),
+      child: Card(
+        elevation: 3,
+        margin: const EdgeInsets.symmetric(vertical: 8),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                visita['titulo'] as String? ?? 'Sin título',
+                style: GoogleFonts.poppins(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.blue[800],
                 ),
-              ],
-            ),
-            if (fechaHora != null) ...[
-              const SizedBox(height: 4),
+              ),
+              const SizedBox(height: 8),
               Row(
                 children: [
-                  Icon(Icons.calendar_today, size: 16, color: Colors.grey[600]),
+                  Icon(Icons.business, size: 16, color: Colors.grey[600]),
                   const SizedBox(width: 8),
                   Text(
-                    '${fechaHora.day}/${fechaHora.month}/${fechaHora.year} - ${fechaHora.hour}:${fechaHora.minute.toString().padLeft(2, '0')}',
+                    visita['empresa'] as String? ?? 'Sin empresa',
                     style: GoogleFonts.roboto(
                       fontSize: 14,
                       color: Colors.grey[800],
@@ -364,24 +395,61 @@ class _ProfesorScreenState extends State<ProfesorScreen> {
                   ),
                 ],
               ),
-            ],
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-              decoration: BoxDecoration(
-                color: _getEstadoColor(visita['estado'] as String?),
-                borderRadius: BorderRadius.circular(12),
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  Icon(Icons.group, size: 16, color: Colors.grey[600]),
+                  const SizedBox(width: 8),
+                  Text(
+                    visita['grupo'] as String? ?? 'Sin grupo',
+                    style: GoogleFonts.roboto(
+                      fontSize: 14,
+                      color: Colors.grey[800],
+                    ),
+                  ),
+                ],
               ),
-              child: Text(
-                (visita['estado'] as String? ?? 'pendiente').toUpperCase(),
-                style: GoogleFonts.roboto(
-                  color: Colors.white,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
+              if (fechaHora != null) ...[
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    Icon(
+                      Icons.calendar_today,
+                      size: 16,
+                      color: Colors.grey[600],
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '${fechaHora.day}/${fechaHora.month}/${fechaHora.year} - ${fechaHora.hour}:${fechaHora.minute.toString().padLeft(2, '0')}',
+                      style: GoogleFonts.roboto(
+                        fontSize: 14,
+                        color: Colors.grey[800],
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 4,
+                ),
+                decoration: BoxDecoration(
+                  color: _getEstadoColor(visita['estado'] as String?),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  (visita['estado'] as String? ?? 'pendiente').toUpperCase(),
+                  style: GoogleFonts.roboto(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -560,17 +628,41 @@ class _ProfesorScreenState extends State<ProfesorScreen> {
                       ),
                     ),
                     const SizedBox(height: 8),
-                    if (visitas.isEmpty)
+                    TextField(
+                      controller: _searchController,
+                      decoration: InputDecoration(
+                        hintText: 'Buscar visitas...',
+                        prefixIcon: const Icon(Icons.search),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        suffixIcon:
+                            _searchText.isNotEmpty
+                                ? IconButton(
+                                  icon: const Icon(Icons.clear),
+                                  onPressed: () {
+                                    _searchController.clear();
+                                    _filterVisitas('');
+                                  },
+                                )
+                                : null,
+                      ),
+                      onChanged: _filterVisitas,
+                    ),
+                    const SizedBox(height: 16),
+                    if (_filteredVisitas.isEmpty)
                       Padding(
                         padding: const EdgeInsets.symmetric(vertical: 24),
                         child: Text(
-                          'No tienes visitas asignadas',
+                          _searchText.isEmpty
+                              ? 'No tienes visitas asignadas'
+                              : 'No se encontraron resultados',
                           style: GoogleFonts.roboto(color: Colors.grey),
                           textAlign: TextAlign.center,
                         ),
                       )
                     else
-                      ...visitas.map(_buildVisitaCard),
+                      ..._filteredVisitas.map(_buildVisitaCard),
                   ],
                 ),
               ),

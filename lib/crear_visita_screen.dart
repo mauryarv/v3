@@ -313,9 +313,14 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
         _isLoading = true;
       });
 
+      // Obtener la ubicación de la empresa seleccionada
+      String ubicacionEmpresa =
+          _obtenerUbicacionEmpresa(empresaSeleccionada) ?? 'No disponible';
+
       Map<String, dynamic> visitaData = {
         "titulo": titulo,
         "empresa": empresaSeleccionada,
+        "ubicacion": ubicacionEmpresa, // Agregar la ubicación aquí
         "grupo": grupoSeleccionado,
         "profesor": profesorSeleccionado,
         "alumnos":

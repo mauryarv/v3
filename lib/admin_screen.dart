@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:v3/aprobar_archivos_screen.dart';
 import 'package:v3/crear_visita_screen.dart';
+import 'package:v3/detalle_visita_screen.dart';
 import 'package:v3/login_screen.dart';
 
 class AdminScreen extends StatefulWidget {
@@ -19,12 +20,15 @@ class AdminScreen extends StatefulWidget {
 class _AdminScreenState extends State<AdminScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final ScrollController _scrollController = ScrollController();
+  final TextEditingController _searchController = TextEditingController();
 
-  // Pagination variables
+  // Pagination and search variables
   int _limit = 10;
   bool _hasMore = true;
   bool _isLoadingMore = false;
   List<DocumentSnapshot> _loadedDocuments = [];
+  String _searchText = '';
+  List<DocumentSnapshot> _filteredDocuments = [];
 
   // Admin data
   String _adminName = "Administrador";
@@ -41,47 +45,35 @@ class _AdminScreenState extends State<AdminScreen> {
   void dispose() {
     _scrollController.removeListener(_scrollListener);
     _scrollController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
-  // ========== CONFIRMATION DIALOGS ==========
-  Future<bool> _showConfirmationDialog({
-    required String title,
-    required String content,
-    String confirmText = "Confirmar",
-    Color confirmColor = Colors.red,
-  }) async {
-    final result = await showDialog<bool>(
-      context: context,
-      builder:
-          (context) => AlertDialog(
-            title: Text(title),
-            content: Text(content),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text("Cancelar"),
-              ),
-              TextButton(
-                onPressed: () => Navigator.pop(context, true),
-                child: Text(confirmText, style: TextStyle(color: confirmColor)),
-              ),
-            ],
-          ),
-    );
-    return result ?? false;
-  }
-
-  Future<void> _confirmLogout() async {
-    final confirm = await _showConfirmationDialog(
-      title: "Cerrar sesión",
-      content: "¿Estás seguro de que deseas salir de la aplicación?",
-      confirmText: "Salir",
-    );
-
-    if (confirm) {
-      await _logout();
-    }
+  // ========== SEARCH METHODS ==========
+  void _filterVisitas(String query) {
+    setState(() {
+      _searchText = query.toLowerCase();
+      if (_searchText.isEmpty) {
+        _filteredDocuments = List.from(_loadedDocuments);
+      } else {
+        _filteredDocuments =
+            _loadedDocuments.where((doc) {
+              final data = doc.data() as Map<String, dynamic>;
+              return data['titulo'].toString().toLowerCase().contains(
+                    _searchText,
+                  ) ||
+                  data['empresa'].toString().toLowerCase().contains(
+                    _searchText,
+                  ) ||
+                  data['grupo'].toString().toLowerCase().contains(
+                    _searchText,
+                  ) ||
+                  data['profesor'].toString().toLowerCase().contains(
+                    _searchText,
+                  );
+            }).toList();
+      }
+    });
   }
 
   // ========== PAGINATION METHODS ==========
@@ -89,7 +81,7 @@ class _AdminScreenState extends State<AdminScreen> {
     if (_scrollController.offset >=
             _scrollController.position.maxScrollExtent &&
         !_scrollController.position.outOfRange) {
-      if (!_isLoadingMore && _hasMore) {
+      if (!_isLoadingMore && _hasMore && _searchText.isEmpty) {
         _loadMoreVisitas();
       }
     }
@@ -167,11 +159,62 @@ class _AdminScreenState extends State<AdminScreen> {
         MaterialPageRoute(
           builder: (context) => CrearVisitaScreen(visita: visita),
         ),
-      );
+      ).then((_) {
+        // Recargar datos después de editar
+        _loadAdminData();
+      });
     }
   }
 
+  void _mostrarDetallesVisita(DocumentSnapshot doc) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => DetalleVisitaScreen(visitaId: doc.id),
+      ),
+    );
+  }
+
   // ========== HELPER METHODS ==========
+  Future<bool> _showConfirmationDialog({
+    required String title,
+    required String content,
+    String confirmText = "Confirmar",
+    Color confirmColor = Colors.red,
+  }) async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            title: Text(title),
+            content: Text(content),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text("Cancelar"),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: Text(confirmText, style: TextStyle(color: confirmColor)),
+              ),
+            ],
+          ),
+    );
+    return result ?? false;
+  }
+
+  Future<void> _confirmLogout() async {
+    final confirm = await _showConfirmationDialog(
+      title: "Cerrar sesión",
+      content: "¿Estás seguro de que deseas salir de la aplicación?",
+      confirmText: "Salir",
+    );
+
+    if (confirm) {
+      await _logout();
+    }
+  }
+
   Future<List<String>> _obtenerNombresAlumnos(List<dynamic> alumnosIds) async {
     List<String> nombres = [];
     for (String id in alumnosIds) {
@@ -203,6 +246,24 @@ class _AdminScreenState extends State<AdminScreen> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
     );
+  }
+
+  Future<void> _confirmOpenFiles(String visitaId) async {
+    final confirm = await _showConfirmationDialog(
+      title: "Revisar archivos",
+      content: "¿Deseas revisar los archivos de esta visita?",
+      confirmText: "Abrir",
+      confirmColor: Colors.orange,
+    );
+
+    if (confirm) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => AprobarArchivosScreen(visitaId: visitaId),
+        ),
+      );
+    }
   }
 
   // ========== UI COMPONENTS ==========
@@ -268,7 +329,7 @@ class _AdminScreenState extends State<AdminScreen> {
         ),
         IconButton(
           icon: const Icon(Icons.logout, size: 22),
-          onPressed: _confirmLogout, // Changed to use confirmation dialog
+          onPressed: _confirmLogout,
           tooltip: 'Cerrar sesión',
           color: Colors.white,
         ),
@@ -288,10 +349,36 @@ class _AdminScreenState extends State<AdminScreen> {
     );
   }
 
+  Widget _buildSearchField() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: TextField(
+        controller: _searchController,
+        decoration: InputDecoration(
+          hintText: 'Buscar visitas...',
+          prefixIcon: const Icon(Icons.search),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+          suffixIcon:
+              _searchText.isNotEmpty
+                  ? IconButton(
+                    icon: const Icon(Icons.clear),
+                    onPressed: () {
+                      _searchController.clear();
+                      _filterVisitas('');
+                    },
+                  )
+                  : null,
+        ),
+        onChanged: _filterVisitas,
+      ),
+    );
+  }
+
   Widget _buildVisitaCard(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
     final titulo = data["titulo"] ?? "Sin título";
     final empresa = data["empresa"] ?? "Desconocida";
+    final ubicacion = data["ubicacion"] ?? "Ubicación no disponible";
     final grupo = data["grupo"] ?? "No asignado";
     final profesor = data["profesor"] ?? "No asignado";
     final alumnos = data["alumnos"] ?? [];
@@ -301,103 +388,89 @@ class _AdminScreenState extends State<AdminScreen> {
             ? DateFormat('dd/MM/yyyy - HH:mm').format(timestamp.toDate())
             : "No definida";
 
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      elevation: 4,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: FutureBuilder<List<String>>(
-        future: _obtenerNombresAlumnos(alumnos),
-        builder: (context, snapshot) {
-          final alumnosTexto =
-              snapshot.hasData
-                  ? snapshot.data!.join(', ')
-                  : snapshot.connectionState == ConnectionState.waiting
-                  ? "Cargando..."
-                  : "No disponibles";
+    return InkWell(
+      onTap: () => _mostrarDetallesVisita(doc),
+      child: Card(
+        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        elevation: 4,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: FutureBuilder<List<String>>(
+          future: _obtenerNombresAlumnos(alumnos),
+          builder: (context, snapshot) {
+            final alumnosTexto =
+                snapshot.hasData
+                    ? snapshot.data!.join(', ')
+                    : snapshot.connectionState == ConnectionState.waiting
+                    ? "Cargando..."
+                    : "No disponibles";
 
-          return Padding(
-            padding: const EdgeInsets.all(12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Expanded(
-                      child: Text(
-                        titulo,
-                        style: GoogleFonts.poppins(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.blue[800],
+            return Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          titulo,
+                          style: GoogleFonts.poppins(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.blue[800],
+                          ),
                         ),
                       ),
-                    ),
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          icon: Icon(Icons.folder_open, color: Colors.orange),
-                          onPressed: () => _confirmOpenFiles(doc.id),
-                          tooltip: 'Revisar Archivos',
-                        ),
-                        IconButton(
-                          icon: Icon(Icons.edit, color: Colors.blue),
-                          onPressed: () => _editarVisita(doc),
-                        ),
-                        IconButton(
-                          icon: Icon(Icons.delete, color: Colors.red),
-                          onPressed: () => _eliminarVisita(doc.id),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                _buildInfoRow(Icons.business, empresa),
-                _buildInfoRow(Icons.people, "Grupo: $grupo"),
-                _buildInfoRow(Icons.person, "Profesor: $profesor"),
-                _buildInfoRow(Icons.calendar_today, fechaHoraTexto),
-                const SizedBox(height: 4),
-                Text(
-                  "Alumnos:",
-                  style: GoogleFonts.roboto(
-                    fontWeight: FontWeight.w500,
-                    color: Colors.grey[700],
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            icon: Icon(Icons.folder_open, color: Colors.orange),
+                            onPressed: () => _confirmOpenFiles(doc.id),
+                            tooltip: 'Revisar Archivos',
+                          ),
+                          IconButton(
+                            icon: Icon(Icons.edit, color: Colors.blue),
+                            onPressed: () => _editarVisita(doc),
+                          ),
+                          IconButton(
+                            icon: Icon(Icons.delete, color: Colors.red),
+                            onPressed: () => _eliminarVisita(doc.id),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  alumnosTexto,
-                  style: GoogleFonts.roboto(
-                    fontSize: 14,
-                    color: Colors.grey[800],
+                  const SizedBox(height: 8),
+                  _buildInfoRow(Icons.business, empresa),
+                  _buildInfoRow(Icons.location_on, "Ubicación: $ubicacion"),
+                  _buildInfoRow(Icons.people, "Grupo: $grupo"),
+                  _buildInfoRow(Icons.person, "Profesor: $profesor"),
+                  _buildInfoRow(Icons.calendar_today, fechaHoraTexto),
+                  const SizedBox(height: 4),
+                  Text(
+                    "Alumnos:",
+                    style: GoogleFonts.roboto(
+                      fontWeight: FontWeight.w500,
+                      color: Colors.grey[700],
+                    ),
                   ),
-                ),
-              ],
-            ),
-          );
-        },
+                  const SizedBox(height: 4),
+                  Text(
+                    alumnosTexto,
+                    style: GoogleFonts.roboto(
+                      fontSize: 14,
+                      color: Colors.grey[800],
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
       ),
     );
-  }
-
-  Future<void> _confirmOpenFiles(String visitaId) async {
-    final confirm = await _showConfirmationDialog(
-      title: "Revisar archivos",
-      content: "¿Deseas revisar los archivos de esta visita?",
-      confirmText: "Abrir",
-      confirmColor: Colors.orange,
-    );
-
-    if (confirm) {
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => AprobarArchivosScreen(visitaId: visitaId),
-        ),
-      );
-    }
   }
 
   Widget _buildInfoRow(IconData icon, String text) {
@@ -426,7 +499,9 @@ class _AdminScreenState extends State<AdminScreen> {
           Icon(Icons.assignment, size: 60, color: Colors.grey[400]),
           const SizedBox(height: 16),
           Text(
-            'No hay visitas creadas',
+            _searchText.isEmpty
+                ? 'No hay visitas creadas'
+                : 'No se encontraron resultados',
             style: GoogleFonts.poppins(fontSize: 18, color: Colors.grey[600]),
           ),
         ],
@@ -453,6 +528,24 @@ class _AdminScreenState extends State<AdminScreen> {
         }
 
         _loadedDocuments = snapshot.data!.docs;
+        _filteredDocuments =
+            _searchText.isEmpty
+                ? List.from(_loadedDocuments)
+                : _loadedDocuments.where((doc) {
+                  final data = doc.data() as Map<String, dynamic>;
+                  return data['titulo'].toString().toLowerCase().contains(
+                        _searchText,
+                      ) ||
+                      data['empresa'].toString().toLowerCase().contains(
+                        _searchText,
+                      ) ||
+                      data['grupo'].toString().toLowerCase().contains(
+                        _searchText,
+                      ) ||
+                      data['profesor'].toString().toLowerCase().contains(
+                        _searchText,
+                      );
+                }).toList();
 
         if (snapshot.data!.docs.length < _limit) {
           _hasMore = false;
@@ -460,13 +553,19 @@ class _AdminScreenState extends State<AdminScreen> {
 
         return Column(
           children: [
-            ...snapshot.data!.docs.map((doc) => _buildVisitaCard(doc)),
+            _buildSearchField(),
+            if (_filteredDocuments.isEmpty)
+              _buildEmptyState()
+            else
+              ..._filteredDocuments.map((doc) => _buildVisitaCard(doc)),
             if (_isLoadingMore)
               const Padding(
                 padding: EdgeInsets.all(16.0),
                 child: CircularProgressIndicator(),
               ),
-            if (!_hasMore && snapshot.data!.docs.isNotEmpty)
+            if (!_hasMore &&
+                _filteredDocuments.isNotEmpty &&
+                _searchText.isEmpty)
               Padding(
                 padding: const EdgeInsets.all(16.0),
                 child: Text(
