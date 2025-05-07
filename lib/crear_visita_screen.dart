@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
+import 'agregar_empresa_screen.dart';
 
 class CrearVisitaScreen extends StatefulWidget {
   final DocumentSnapshot? visita;
@@ -18,7 +19,8 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final _formKey = GlobalKey<FormState>();
 
-  List<String> empresas = [];
+  List<Map<String, String>> empresas = [];
+  List<String> empresasNombres = [];
   List<String> grupos = [];
   List<String> profesores = [];
   Map<String, List<Map<String, String>>> alumnosPorGrupo = {};
@@ -31,7 +33,6 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
   DateTime? fechaSeleccionada;
   TimeOfDay? horaSeleccionada;
   TextEditingController tituloController = TextEditingController();
-  TextEditingController nuevaEmpresaController = TextEditingController();
   Map<String, bool> seleccionarTodosPorGrupo = {};
   bool _isLoading = false;
 
@@ -75,6 +76,15 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
     }
   }
 
+  String? _obtenerUbicacionEmpresa(String? nombreEmpresa) {
+    if (nombreEmpresa == null) return null;
+    final empresa = empresas.firstWhere(
+      (emp) => emp['nombre'] == nombreEmpresa,
+      orElse: () => {'ubicacion': 'No disponible'},
+    );
+    return empresa['ubicacion'];
+  }
+
   void _toggleSeleccionarTodos(String grupo) {
     setState(() {
       bool seleccionarTodos = seleccionarTodosPorGrupo[grupo] ?? false;
@@ -95,7 +105,7 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
         _isLoading = true;
       });
 
-      // Cargar empresas
+      // Cargar empresas con ubicación
       QuerySnapshot empresasSnapshot =
           await _firestore.collection("empresas").get();
 
@@ -115,18 +125,25 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
 
       setState(() {
         empresas =
-            empresasSnapshot.docs
-                .map((doc) => doc["nombre"].toString())
-                .toList();
+            empresasSnapshot.docs.map((doc) {
+              return {
+                'nombre': doc["nombre"].toString(),
+                'ubicacion': doc["ubicacion"]?.toString() ?? 'No disponible',
+              };
+            }).toList();
+        empresasNombres = empresas.map((e) => e['nombre']!).toList();
+
         grupos =
             alumnosSnapshot.docs
                 .map((doc) => doc["grupo"].toString())
                 .toSet()
                 .toList();
+
         profesores =
             profesoresSnapshot.docs
                 .map((doc) => doc["nombre"].toString())
                 .toList();
+
         _isLoading = false;
       });
     } catch (e) {
@@ -432,9 +449,8 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
         ],
       ),
       body: Column(
-        crossAxisAlignment: CrossAxisAlignment.center, // Cambiado a center
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          // Título centrado
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 10.0),
             child: Center(
@@ -448,8 +464,6 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
               ),
             ),
           ),
-
-          // Contenido principal con formulario
           Expanded(
             child:
                 _isLoading
@@ -461,7 +475,6 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            // Campo de título
                             TextFormField(
                               controller: tituloController,
                               decoration: InputDecoration(
@@ -484,42 +497,62 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
                                 });
                               },
                             ),
-
                             const SizedBox(height: 20),
-
-                            // Selección de empresa
                             Row(
                               children: [
                                 Expanded(
-                                  child: DropdownButtonFormField<String>(
-                                    value: empresaSeleccionada,
-                                    hint: const Text("Selecciona una empresa"),
-                                    items:
-                                        empresas.map((empresa) {
-                                          return DropdownMenuItem<String>(
-                                            value: empresa,
-                                            child: Text(empresa),
-                                          );
-                                        }).toList(),
-                                    onChanged: (value) {
-                                      setState(() {
-                                        empresaSeleccionada = value;
-                                      });
-                                    },
-                                    decoration: InputDecoration(
-                                      border: OutlineInputBorder(
-                                        borderRadius: BorderRadius.circular(10),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      DropdownButtonFormField<String>(
+                                        value: empresaSeleccionada,
+                                        hint: const Text(
+                                          "Selecciona una empresa",
+                                        ),
+                                        items:
+                                            empresasNombres.map((empresa) {
+                                              return DropdownMenuItem<String>(
+                                                value: empresa,
+                                                child: Text(empresa),
+                                              );
+                                            }).toList(),
+                                        onChanged: (value) {
+                                          setState(() {
+                                            empresaSeleccionada = value;
+                                          });
+                                        },
+                                        decoration: InputDecoration(
+                                          border: OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(
+                                              10,
+                                            ),
+                                          ),
+                                          filled: true,
+                                          fillColor: Colors.grey[50],
+                                        ),
+                                        validator: (value) {
+                                          if (value == null || value.isEmpty) {
+                                            return 'Selecciona una empresa';
+                                          }
+                                          return null;
+                                        },
+                                        isExpanded: true,
                                       ),
-                                      filled: true,
-                                      fillColor: Colors.grey[50],
-                                    ),
-                                    validator: (value) {
-                                      if (value == null || value.isEmpty) {
-                                        return 'Selecciona una empresa';
-                                      }
-                                      return null;
-                                    },
-                                    isExpanded: true,
+                                      if (empresaSeleccionada != null)
+                                        Padding(
+                                          padding: const EdgeInsets.only(
+                                            top: 8.0,
+                                          ),
+                                          child: Text(
+                                            "Ubicación: ${_obtenerUbicacionEmpresa(empresaSeleccionada)}",
+                                            style: TextStyle(
+                                              color: Colors.grey[600],
+                                              fontSize: 14,
+                                            ),
+                                          ),
+                                        ),
+                                    ],
                                   ),
                                 ),
                                 const SizedBox(width: 10),
@@ -533,10 +566,7 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
                                 ),
                               ],
                             ),
-
                             const SizedBox(height: 20),
-
-                            // Selección de grupo
                             DropdownButtonFormField<String>(
                               value: grupoSeleccionado,
                               hint: const Text("Selecciona un grupo"),
@@ -570,10 +600,7 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
                               },
                               isExpanded: true,
                             ),
-
                             const SizedBox(height: 20),
-
-                            // Selección de profesor
                             DropdownButtonFormField<String>(
                               value: profesorSeleccionado,
                               hint: const Text("Selecciona un profesor"),
@@ -604,10 +631,7 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
                               },
                               isExpanded: true,
                             ),
-
                             const SizedBox(height: 20),
-
-                            // Selección de fecha y hora
                             Row(
                               children: [
                                 Expanded(
@@ -681,10 +705,7 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
                                 ),
                               ],
                             ),
-
                             const SizedBox(height: 20),
-
-                            // Selección de alumnos
                             if (grupoSeleccionado != null &&
                                 alumnosPorGrupo[grupoSeleccionado] != null) ...[
                               const Text(
@@ -701,7 +722,6 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
                                   padding: const EdgeInsets.all(8.0),
                                   child: Column(
                                     children: [
-                                      // Checkbox para seleccionar/deseleccionar todos
                                       CheckboxListTile(
                                         title: const Text(
                                           "Seleccionar/Deseleccionar Todos",
@@ -718,7 +738,6 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
                                             ListTileControlAffinity.leading,
                                       ),
                                       const Divider(),
-                                      // Lista de alumnos
                                       ConstrainedBox(
                                         constraints: BoxConstraints(
                                           maxHeight: size.height * 0.3,
@@ -766,9 +785,7 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
                                 ),
                               ),
                             ],
-
                             const SizedBox(height: 30),
-
                             ElevatedButton(
                               onPressed: _guardarVisita,
                               style: ElevatedButton.styleFrom(
@@ -804,130 +821,5 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
         ],
       ),
     );
-  }
-}
-
-class AgregarEmpresaScreen extends StatefulWidget {
-  const AgregarEmpresaScreen({super.key});
-
-  @override
-  _AgregarEmpresaScreenState createState() => _AgregarEmpresaScreenState();
-}
-
-class _AgregarEmpresaScreenState extends State<AgregarEmpresaScreen> {
-  final _formKey = GlobalKey<FormState>();
-  final _nombreController = TextEditingController();
-  bool _isLoading = false;
-
-  Future<void> _guardarEmpresa() async {
-    if (!_formKey.currentState!.validate()) return;
-
-    setState(() {
-      _isLoading = true;
-    });
-
-    try {
-      await FirebaseFirestore.instance.collection("empresas").add({
-        "nombre": _nombreController.text,
-      });
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text("Empresa agregada exitosamente"),
-            backgroundColor: Colors.green,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
-            ),
-          ),
-        );
-        Navigator.pop(context);
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text("Error al guardar empresa: $e"),
-            backgroundColor: Colors.red,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
-            ),
-          ),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text("Visitas Escolares V3"),
-        backgroundColor: Colors.blue,
-        elevation: 0,
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              TextFormField(
-                controller: _nombreController,
-                decoration: InputDecoration(
-                  labelText: "Nombre de la empresa",
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  filled: true,
-                  fillColor: Colors.grey[50],
-                ),
-                validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return 'Por favor ingresa un nombre';
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: 20),
-              ElevatedButton(
-                onPressed: _guardarEmpresa,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.blue,
-                  padding: const EdgeInsets.symmetric(vertical: 15),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                ),
-                child:
-                    _isLoading
-                        ? const CircularProgressIndicator(color: Colors.white)
-                        : const Text(
-                          "AGREGAR EMPRESA",
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  @override
-  void dispose() {
-    _nombreController.dispose();
-    super.dispose();
   }
 }
