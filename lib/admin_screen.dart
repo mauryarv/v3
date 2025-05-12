@@ -5,6 +5,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:excel/excel.dart';
 import 'package:v3/aprobar_archivos_screen.dart';
 import 'package:v3/crear_visita_screen.dart';
 import 'package:v3/detalle_visita_screen.dart';
@@ -22,7 +24,7 @@ class _AdminScreenState extends State<AdminScreen> {
   final ScrollController _scrollController = ScrollController();
   final TextEditingController _searchController = TextEditingController();
 
-  // Pagination and search variables
+  // Variables de paginación y búsqueda
   int _limit = 10;
   bool _hasMore = true;
   bool _isLoadingMore = false;
@@ -30,7 +32,7 @@ class _AdminScreenState extends State<AdminScreen> {
   String _searchText = '';
   List<DocumentSnapshot> _filteredDocuments = [];
 
-  // Admin data
+  // Datos del administrador
   String _adminName = "Administrador";
   bool _isLoading = true;
 
@@ -49,7 +51,326 @@ class _AdminScreenState extends State<AdminScreen> {
     super.dispose();
   }
 
-  // ========== SEARCH METHODS ==========
+  // ========== MÉTODOS OPTIMIZADOS PARA CARGA DESDE EXCEL ==========
+
+  Future<void> _cargarAlumnosDesdeExcel() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['xlsx', 'xls'],
+        allowMultiple: false,
+        withData: true,
+      );
+
+      if (result == null || result.files.isEmpty) return;
+
+      final file = result.files.first;
+      final bytes = file.bytes;
+
+      if (bytes == null || bytes.isEmpty) {
+        _mostrarError("No se pudo leer el archivo o está vacío");
+        return;
+      }
+
+      // Configurar diálogo de progreso
+      bool isDialogOpen = true;
+      int totalAlumnos = 0;
+      int gruposProcesados = 0;
+      final progressDialog = showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder:
+            (context) => StatefulBuilder(
+              builder: (context, setState) {
+                return AlertDialog(
+                  title: const Text("Procesando archivo..."),
+                  content: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      CircularProgressIndicator(value: totalAlumnos / 5000),
+                      const SizedBox(height: 16),
+                      Text("Alumnos procesados: $totalAlumnos"),
+                      Text("Grupos procesados: $gruposProcesados"),
+                    ],
+                  ),
+                );
+              },
+            ),
+      );
+
+      final excel = Excel.decodeBytes(bytes);
+      List<String> errores = [];
+      WriteBatch batch = _firestore.batch();
+      const batchSize = 400;
+
+      // Procesar cada hoja
+      for (var sheetName in excel.tables.keys) {
+        final sheet = excel.tables[sheetName]!;
+
+        // Validar estructura
+        if (sheet.maxColumns < 2 ||
+            sheet.row(0)[0]?.value.toString().toLowerCase() != "boleta" ||
+            sheet.row(0)[1]?.value.toString().toLowerCase() != "nombre") {
+          errores.add("Formato incorrecto en hoja '$sheetName'");
+          continue;
+        }
+
+        // Procesar filas
+        for (var row in sheet.rows.skip(1)) {
+          try {
+            dynamic boletaValue = row[0]?.value;
+            String boleta = boletaValue?.toString() ?? '';
+
+            if (boletaValue is num) {
+              boleta = boletaValue.toStringAsFixed(0);
+            }
+
+            // Validar boleta
+            if (boleta.length != 10 || !RegExp(r'^[0-9]+$').hasMatch(boleta)) {
+              errores.add("Boleta inválida en hoja $sheetName: $boleta");
+              continue;
+            }
+
+            final nombre = row[1]?.value?.toString().trim() ?? '';
+            if (nombre.isEmpty) {
+              errores.add("Nombre vacío para boleta $boleta");
+              continue;
+            }
+
+            // Agregar al batch
+            final alumnoRef = _firestore.collection('usuarios').doc(boleta);
+            batch.set(alumnoRef, {
+              'nombre': nombre,
+              'rol': 'alumno',
+              'grupo': sheetName,
+              'fecha_registro': FieldValue.serverTimestamp(),
+            }, SetOptions(merge: true));
+
+            totalAlumnos++;
+
+            // Commit parcial
+            if (totalAlumnos % batchSize == 0) {
+              await batch.commit();
+              batch = _firestore.batch();
+              if (isDialogOpen) {
+                Navigator.pop(context);
+                progressDialog.then((_) {
+                  showDialog(
+                    context: context,
+                    barrierDismissible: false,
+                    builder:
+                        (context) => AlertDialog(
+                          title: const Text("Procesando archivo..."),
+                          content: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              CircularProgressIndicator(
+                                value: totalAlumnos / 5000,
+                              ),
+                              const SizedBox(height: 16),
+                              Text("Alumnos procesados: $totalAlumnos"),
+                              Text(
+                                "Grupos procesados: ${gruposProcesados + 1}",
+                              ),
+                            ],
+                          ),
+                        ),
+                  );
+                });
+              }
+            }
+          } catch (e) {
+            errores.add("Error en hoja $sheetName: ${e.toString()}");
+          }
+        }
+        gruposProcesados++;
+      }
+
+      // Commit final
+      if (totalAlumnos % batchSize != 0) {
+        await batch.commit();
+      }
+
+      // Cerrar diálogo
+      if (isDialogOpen) Navigator.pop(context);
+
+      // Mostrar resultados
+      if (errores.isEmpty) {
+        _mostrarExito(
+          "$totalAlumnos alumnos cargados en $gruposProcesados grupos",
+        );
+      } else {
+        String mensaje =
+            "$totalAlumnos alumnos cargados, pero con ${errores.length} errores";
+        _mostrarError(mensaje);
+      }
+    } catch (e) {
+      Navigator.pop(context);
+      _mostrarError("Error al procesar archivo: ${e.toString()}");
+    }
+  }
+
+  Future<void> _cargarProfesoresDesdeExcel() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['xlsx', 'xls'],
+        allowMultiple: false,
+        withData: true,
+      );
+
+      if (result == null || result.files.isEmpty) return;
+
+      final file = result.files.first;
+      final bytes = file.bytes;
+
+      if (bytes == null || bytes.isEmpty) {
+        _mostrarError("No se pudo leer el archivo o está vacío");
+        return;
+      }
+
+      // Mostrar diálogo de progreso
+      bool isDialogOpen = true;
+      int totalProfesores = 0;
+      final progressDialog = showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder:
+            (context) => StatefulBuilder(
+              builder: (context, setState) {
+                return AlertDialog(
+                  title: const Text("Procesando archivo..."),
+                  content: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      CircularProgressIndicator(value: totalProfesores / 1000),
+                      const SizedBox(height: 16),
+                      Text("Profesores procesados: $totalProfesores"),
+                    ],
+                  ),
+                );
+              },
+            ),
+      );
+
+      // Procesamiento en batches
+      final excel = Excel.decodeBytes(bytes);
+      final sheet = excel.tables[excel.tables.keys.first]!;
+      List<String> errores = [];
+      WriteBatch batch = _firestore.batch();
+      const batchSize = 400;
+
+      // Validar estructura
+      if (sheet.maxColumns < 2 ||
+          sheet.row(0)[0]?.value.toString().toLowerCase() != "numero" ||
+          sheet.row(0)[1]?.value.toString().toLowerCase() != "nombre") {
+        Navigator.pop(context);
+        _mostrarError(
+          "Formato incorrecto. Se requieren columnas: Número, Nombre",
+        );
+        return;
+      }
+
+      // Procesar filas
+      for (var row in sheet.rows.skip(1)) {
+        try {
+          final numeroEmpleado = row[0]?.value?.toString().trim() ?? '';
+          final nombre = row[1]?.value?.toString().trim() ?? '';
+
+          if (numeroEmpleado.isEmpty || nombre.isEmpty) continue;
+
+          final profesorRef = _firestore
+              .collection('usuarios')
+              .doc(numeroEmpleado);
+          batch.set(profesorRef, {
+            'numero_empleado': numeroEmpleado,
+            'nombre': nombre,
+            'rol': 'profesor',
+            'fecha_registro': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
+
+          totalProfesores++;
+
+          // Commit parcial cada batchSize
+          if (totalProfesores % batchSize == 0) {
+            await batch.commit();
+            batch = _firestore.batch();
+            if (isDialogOpen) {
+              // Actualizar diálogo
+              Navigator.pop(context);
+              progressDialog.then((_) {
+                showDialog(
+                  context: context,
+                  barrierDismissible: false,
+                  builder:
+                      (context) => AlertDialog(
+                        title: const Text("Procesando archivo..."),
+                        content: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            CircularProgressIndicator(
+                              value: totalProfesores / 1000,
+                            ),
+                            const SizedBox(height: 16),
+                            Text("Profesores procesados: $totalProfesores"),
+                          ],
+                        ),
+                      ),
+                );
+              });
+            }
+          }
+        } catch (e) {
+          errores.add(
+            "Error en fila ${row.indexOf(row as Data?)}: ${e.toString()}",
+          );
+        }
+      }
+
+      // Commit final si quedan operaciones pendientes
+      if (totalProfesores % batchSize != 0) {
+        await batch.commit();
+      }
+
+      // Cerrar diálogo
+      if (isDialogOpen) Navigator.pop(context);
+
+      // Mostrar resultados
+      if (errores.isEmpty) {
+        _mostrarExito("$totalProfesores profesores cargados exitosamente");
+      } else {
+        String mensaje =
+            "$totalProfesores profesores cargados, pero con ${errores.length} errores";
+        _mostrarError(mensaje);
+      }
+    } catch (e) {
+      Navigator.pop(context);
+      _mostrarError("Error al procesar archivo: ${e.toString()}");
+    }
+  }
+
+  // ========== MÉTODOS AUXILIARES OPTIMIZADOS ==========
+
+  Future<List<String>> _obtenerNombresAlumnos(List<dynamic> alumnosIds) async {
+    if (alumnosIds.isEmpty) return [];
+
+    try {
+      // Usar consulta batch para reducir lecturas
+      final query = _firestore
+          .collection('usuarios')
+          .where(FieldPath.documentId, whereIn: alumnosIds.take(10).toList())
+          .limit(10);
+
+      final snapshot = await query.get();
+      return snapshot.docs
+          .map((doc) => doc['nombre']?.toString() ?? 'Desconocido')
+          .toList();
+    } catch (e) {
+      print('Error al obtener nombres: $e');
+      return List.filled(alumnosIds.length, 'Desconocido');
+    }
+  }
+
   void _filterVisitas(String query) {
     setState(() {
       _searchText = query.toLowerCase();
@@ -76,7 +397,6 @@ class _AdminScreenState extends State<AdminScreen> {
     });
   }
 
-  // ========== PAGINATION METHODS ==========
   void _scrollListener() {
     if (_scrollController.offset >=
             _scrollController.position.maxScrollExtent &&
@@ -101,7 +421,6 @@ class _AdminScreenState extends State<AdminScreen> {
     }
   }
 
-  // ========== CORE FUNCTIONALITY ==========
   Future<void> _loadAdminData() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -160,7 +479,6 @@ class _AdminScreenState extends State<AdminScreen> {
           builder: (context) => CrearVisitaScreen(visita: visita),
         ),
       ).then((_) {
-        // Recargar datos después de editar
         _loadAdminData();
       });
     }
@@ -175,7 +493,6 @@ class _AdminScreenState extends State<AdminScreen> {
     );
   }
 
-  // ========== HELPER METHODS ==========
   Future<bool> _showConfirmationDialog({
     required String title,
     required String content,
@@ -213,17 +530,6 @@ class _AdminScreenState extends State<AdminScreen> {
     if (confirm) {
       await _logout();
     }
-  }
-
-  Future<List<String>> _obtenerNombresAlumnos(List<dynamic> alumnosIds) async {
-    List<String> nombres = [];
-    for (String id in alumnosIds) {
-      var alumnoDoc = await _firestore.collection('usuarios').doc(id).get();
-      if (alumnoDoc.exists) {
-        nombres.add(alumnoDoc['nombre'] ?? 'Desconocido');
-      }
-    }
-    return nombres;
   }
 
   void _mostrarError(String mensaje) {
@@ -266,7 +572,6 @@ class _AdminScreenState extends State<AdminScreen> {
     }
   }
 
-  // ========== UI COMPONENTS ==========
   PreferredSizeWidget _buildAppBar() {
     return AppBar(
       title: LayoutBuilder(
@@ -381,7 +686,7 @@ class _AdminScreenState extends State<AdminScreen> {
     final ubicacion = data["ubicacion"] ?? "Ubicación no disponible";
     final grupo = data["grupo"] ?? "No asignado";
     final profesor = data["profesor"] ?? "No asignado";
-    final alumnos = data["alumnos"] ?? [];
+    final alumnos = data["alumnos"] as List<dynamic>? ?? [];
     final timestamp = data["fecha_hora"] as Timestamp?;
     final fechaHoraTexto =
         timestamp != null
@@ -604,6 +909,42 @@ class _AdminScreenState extends State<AdminScreen> {
                         color: Colors.blue,
                         fontWeight: FontWeight.bold,
                       ),
+                    ),
+                  ),
+                  // Botones para cargar desde Excel
+                  Padding(
+                    padding: const EdgeInsets.all(8.0),
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        ElevatedButton.icon(
+                          icon: const Icon(Icons.upload_file),
+                          label: const Text('Cargar alumnos'),
+                          onPressed: _cargarAlumnosDesdeExcel,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.green,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 20,
+                              vertical: 12,
+                            ),
+                          ),
+                        ),
+                        ElevatedButton.icon(
+                          icon: const Icon(Icons.upload_file),
+                          label: const Text('Cargar profesores'),
+                          onPressed: _cargarProfesoresDesdeExcel,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.blue,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 20,
+                              vertical: 12,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                   Expanded(
