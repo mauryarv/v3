@@ -1,7 +1,7 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
-import 'package:v3/login_screen.dart'; // Asegúrate de que el nombre de la ruta sea correcto
+import 'package:v3/login_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -16,7 +16,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'Subir PDF a Firebase',
+      title: 'Visitas Escolares V3',
       home: LoginScreen(),
       localizationsDelegates: [
         GlobalMaterialLocalizations.delegate,

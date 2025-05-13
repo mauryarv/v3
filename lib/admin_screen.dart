@@ -24,15 +24,12 @@ class _AdminScreenState extends State<AdminScreen> {
   final ScrollController _scrollController = ScrollController();
   final TextEditingController _searchController = TextEditingController();
 
-  // Variables de paginación y búsqueda
   int _limit = 10;
   bool _hasMore = true;
   bool _isLoadingMore = false;
   List<DocumentSnapshot> _loadedDocuments = [];
   String _searchText = '';
   List<DocumentSnapshot> _filteredDocuments = [];
-
-  // Datos del administrador
   String _adminName = "Administrador";
   bool _isLoading = true;
 
@@ -51,7 +48,165 @@ class _AdminScreenState extends State<AdminScreen> {
     super.dispose();
   }
 
-  // ========== MÉTODOS OPTIMIZADOS PARA CARGA DESDE EXCEL ==========
+  Future<void> _mostrarDialogoAgregarAdmin() async {
+    final formKey = GlobalKey<FormState>();
+    final numeroController = TextEditingController();
+    final nombreController = TextEditingController();
+    final passwordController = TextEditingController();
+    final preguntaController = TextEditingController();
+    final respuestaController = TextEditingController();
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder:
+          (context) => AlertDialog(
+            title: const Text('Agregar Nuevo Administrador'),
+            content: SingleChildScrollView(
+              child: Form(
+                key: formKey,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextFormField(
+                      controller: numeroController,
+                      decoration: const InputDecoration(
+                        labelText: 'Número de empleado (7 dígitos)',
+                        prefixIcon: Icon(Icons.badge),
+                      ),
+                      keyboardType: TextInputType.number,
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return 'Campo obligatorio';
+                        }
+                        if (value.length != 7 ||
+                            !RegExp(r'^[0-9]+$').hasMatch(value)) {
+                          return 'Debe tener exactamente 7 dígitos';
+                        }
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: nombreController,
+                      decoration: const InputDecoration(
+                        labelText: 'Nombre completo',
+                        prefixIcon: Icon(Icons.person),
+                      ),
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return 'Campo obligatorio';
+                        }
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: passwordController,
+                      decoration: const InputDecoration(
+                        labelText: 'Contraseña temporal',
+                        prefixIcon: Icon(Icons.lock),
+                      ),
+                      obscureText: true,
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return 'Debe establecer una contraseña';
+                        }
+                        if (value.length < 6) {
+                          return 'Mínimo 6 caracteres';
+                        }
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: preguntaController,
+                      decoration: const InputDecoration(
+                        labelText: 'Pregunta de seguridad',
+                        prefixIcon: Icon(Icons.security),
+                        hintText: 'Ej: ¿Cuál es el nombre de tu mascota?',
+                      ),
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return 'Debe establecer una pregunta';
+                        }
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: respuestaController,
+                      decoration: const InputDecoration(
+                        labelText: 'Respuesta de seguridad',
+                        prefixIcon: Icon(Icons.question_answer),
+                      ),
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return 'Debe establecer una respuesta';
+                        }
+                        return null;
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancelar'),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.deepPurple,
+                ),
+                onPressed: () async {
+                  if (formKey.currentState!.validate()) {
+                    try {
+                      final doc =
+                          await _firestore
+                              .collection('usuarios')
+                              .doc(numeroController.text)
+                              .get();
+
+                      if (doc.exists && doc.data()?['rol'] == 'admin') {
+                        _mostrarError(
+                          'Ya existe un administrador con este número',
+                        );
+                        return;
+                      }
+
+                      await _firestore
+                          .collection('usuarios')
+                          .doc(numeroController.text)
+                          .set({
+                            'numero_empleado': numeroController.text,
+                            'nombre': nombreController.text,
+                            'password': passwordController.text,
+                            'pregunta_seguridad': preguntaController.text,
+                            'respuesta_seguridad': respuestaController.text,
+                            'rol': 'admin',
+                            'fecha_registro': FieldValue.serverTimestamp(),
+                          }, SetOptions(merge: true));
+
+                      Navigator.pop(context);
+                      _mostrarExito('Administrador agregado exitosamente');
+                    } catch (e) {
+                      _mostrarError(
+                        'Error al agregar administrador: ${e.toString()}',
+                      );
+                    }
+                  }
+                },
+                child: const Text(
+                  'Guardar',
+                  style: TextStyle(color: Colors.white),
+                ),
+              ),
+            ],
+          ),
+    );
+  }
 
   Future<void> _cargarAlumnosDesdeExcel() async {
     try {
@@ -72,7 +227,6 @@ class _AdminScreenState extends State<AdminScreen> {
         return;
       }
 
-      // Configurar diálogo de progreso
       bool isDialogOpen = true;
       int totalAlumnos = 0;
       int gruposProcesados = 0;
@@ -103,11 +257,18 @@ class _AdminScreenState extends State<AdminScreen> {
       WriteBatch batch = _firestore.batch();
       const batchSize = 400;
 
-      // Procesar cada hoja
+      final alumnosActualesSnapshot =
+          await _firestore
+              .collection('usuarios')
+              .where('rol', isEqualTo: 'alumno')
+              .get();
+      final alumnosActuales =
+          alumnosActualesSnapshot.docs.map((doc) => doc.id).toSet();
+      final alumnosEnExcel = <String>{};
+
       for (var sheetName in excel.tables.keys) {
         final sheet = excel.tables[sheetName]!;
 
-        // Validar estructura
         if (sheet.maxColumns < 2 ||
             sheet.row(0)[0]?.value.toString().toLowerCase() != "boleta" ||
             sheet.row(0)[1]?.value.toString().toLowerCase() != "nombre") {
@@ -115,7 +276,6 @@ class _AdminScreenState extends State<AdminScreen> {
           continue;
         }
 
-        // Procesar filas
         for (var row in sheet.rows.skip(1)) {
           try {
             dynamic boletaValue = row[0]?.value;
@@ -125,7 +285,6 @@ class _AdminScreenState extends State<AdminScreen> {
               boleta = boletaValue.toStringAsFixed(0);
             }
 
-            // Validar boleta
             if (boleta.length != 10 || !RegExp(r'^[0-9]+$').hasMatch(boleta)) {
               errores.add("Boleta inválida en hoja $sheetName: $boleta");
               continue;
@@ -137,7 +296,6 @@ class _AdminScreenState extends State<AdminScreen> {
               continue;
             }
 
-            // Agregar al batch
             final alumnoRef = _firestore.collection('usuarios').doc(boleta);
             batch.set(alumnoRef, {
               'nombre': nombre,
@@ -146,9 +304,9 @@ class _AdminScreenState extends State<AdminScreen> {
               'fecha_registro': FieldValue.serverTimestamp(),
             }, SetOptions(merge: true));
 
+            alumnosEnExcel.add(boleta);
             totalAlumnos++;
 
-            // Commit parcial
             if (totalAlumnos % batchSize == 0) {
               await batch.commit();
               batch = _firestore.batch();
@@ -186,22 +344,29 @@ class _AdminScreenState extends State<AdminScreen> {
         gruposProcesados++;
       }
 
-      // Commit final
       if (totalAlumnos % batchSize != 0) {
         await batch.commit();
       }
 
-      // Cerrar diálogo
+      final alumnosAEliminar = alumnosActuales.difference(alumnosEnExcel);
+      if (alumnosAEliminar.isNotEmpty) {
+        final deleteBatch = _firestore.batch();
+        for (final boleta in alumnosAEliminar) {
+          deleteBatch.delete(_firestore.collection('usuarios').doc(boleta));
+        }
+        await deleteBatch.commit();
+      }
+
       if (isDialogOpen) Navigator.pop(context);
 
-      // Mostrar resultados
       if (errores.isEmpty) {
         _mostrarExito(
-          "$totalAlumnos alumnos cargados en $gruposProcesados grupos",
+          "$totalAlumnos alumnos cargados en $gruposProcesados grupos\n"
+          "${alumnosAEliminar.length} alumnos eliminados por no estar en el archivo",
         );
       } else {
         String mensaje =
-            "$totalAlumnos alumnos cargados, pero con ${errores.length} errores";
+            "$totalAlumnos alumnos cargados, ${alumnosAEliminar.length} eliminados, pero con ${errores.length} errores";
         _mostrarError(mensaje);
       }
     } catch (e) {
@@ -229,7 +394,6 @@ class _AdminScreenState extends State<AdminScreen> {
         return;
       }
 
-      // Mostrar diálogo de progreso
       bool isDialogOpen = true;
       int totalProfesores = 0;
       final progressDialog = showDialog(
@@ -253,14 +417,25 @@ class _AdminScreenState extends State<AdminScreen> {
             ),
       );
 
-      // Procesamiento en batches
+      final usuariosSnapshot = await _firestore.collection('usuarios').get();
+      final profesoresActuales =
+          usuariosSnapshot.docs
+              .where((doc) => doc.data()['rol'] == 'profesor')
+              .map((doc) => doc.id)
+              .toSet();
+      final administradores =
+          usuariosSnapshot.docs
+              .where((doc) => doc.data()['rol'] == 'admin')
+              .map((doc) => doc.id)
+              .toSet();
+      final profesoresEnExcel = <String>{};
+
       final excel = Excel.decodeBytes(bytes);
       final sheet = excel.tables[excel.tables.keys.first]!;
       List<String> errores = [];
       WriteBatch batch = _firestore.batch();
       const batchSize = 400;
 
-      // Validar estructura
       if (sheet.maxColumns < 2 ||
           sheet.row(0)[0]?.value.toString().toLowerCase() != "numero" ||
           sheet.row(0)[1]?.value.toString().toLowerCase() != "nombre") {
@@ -271,7 +446,6 @@ class _AdminScreenState extends State<AdminScreen> {
         return;
       }
 
-      // Procesar filas
       for (var row in sheet.rows.skip(1)) {
         try {
           final numeroEmpleado = row[0]?.value?.toString().trim() ?? '';
@@ -289,14 +463,13 @@ class _AdminScreenState extends State<AdminScreen> {
             'fecha_registro': FieldValue.serverTimestamp(),
           }, SetOptions(merge: true));
 
+          profesoresEnExcel.add(numeroEmpleado);
           totalProfesores++;
 
-          // Commit parcial cada batchSize
           if (totalProfesores % batchSize == 0) {
             await batch.commit();
             batch = _firestore.batch();
             if (isDialogOpen) {
-              // Actualizar diálogo
               Navigator.pop(context);
               progressDialog.then((_) {
                 showDialog(
@@ -327,20 +500,36 @@ class _AdminScreenState extends State<AdminScreen> {
         }
       }
 
-      // Commit final si quedan operaciones pendientes
       if (totalProfesores % batchSize != 0) {
         await batch.commit();
       }
 
-      // Cerrar diálogo
+      final profesoresAEliminar = profesoresActuales
+          .difference(profesoresEnExcel)
+          .difference(administradores);
+
+      if (profesoresAEliminar.isNotEmpty) {
+        final deleteBatch = _firestore.batch();
+        for (final numeroEmpleado in profesoresAEliminar) {
+          deleteBatch.delete(
+            _firestore.collection('usuarios').doc(numeroEmpleado),
+          );
+        }
+        await deleteBatch.commit();
+      }
+
       if (isDialogOpen) Navigator.pop(context);
 
-      // Mostrar resultados
       if (errores.isEmpty) {
-        _mostrarExito("$totalProfesores profesores cargados exitosamente");
+        _mostrarExito(
+          "$totalProfesores profesores cargados exitosamente\n"
+          "${profesoresAEliminar.length} profesores eliminados por no estar en el archivo\n"
+          "${administradores.length} administradores protegidos",
+        );
       } else {
         String mensaje =
-            "$totalProfesores profesores cargados, pero con ${errores.length} errores";
+            "$totalProfesores profesores cargados, ${profesoresAEliminar.length} eliminados, "
+            "${administradores.length} administradores protegidos, pero con ${errores.length} errores";
         _mostrarError(mensaje);
       }
     } catch (e) {
@@ -349,13 +538,10 @@ class _AdminScreenState extends State<AdminScreen> {
     }
   }
 
-  // ========== MÉTODOS AUXILIARES OPTIMIZADOS ==========
-
   Future<List<String>> _obtenerNombresAlumnos(List<dynamic> alumnosIds) async {
     if (alumnosIds.isEmpty) return [];
 
     try {
-      // Usar consulta batch para reducir lecturas
       final query = _firestore
           .collection('usuarios')
           .where(FieldPath.documentId, whereIn: alumnosIds.take(10).toList())
@@ -604,6 +790,12 @@ class _AdminScreenState extends State<AdminScreen> {
         },
       ),
       actions: [
+        IconButton(
+          icon: const Icon(Icons.person_add, size: 22),
+          onPressed: _mostrarDialogoAgregarAdmin,
+          tooltip: 'Agregar administrador',
+          color: Colors.white,
+        ),
         LayoutBuilder(
           builder: (context, constraints) {
             final showFullName = constraints.maxWidth > 350;
@@ -911,7 +1103,6 @@ class _AdminScreenState extends State<AdminScreen> {
                       ),
                     ),
                   ),
-                  // Botones para cargar desde Excel
                   Padding(
                     padding: const EdgeInsets.all(8.0),
                     child: Wrap(
@@ -941,6 +1132,27 @@ class _AdminScreenState extends State<AdminScreen> {
                             padding: const EdgeInsets.symmetric(
                               horizontal: 20,
                               vertical: 12,
+                            ),
+                          ),
+                        ),
+                        ElevatedButton.icon(
+                          icon: const Icon(
+                            Icons.person_add,
+                            color: Colors.white,
+                          ),
+                          label: const Text(
+                            'Agregar Admin',
+                            style: TextStyle(color: Colors.white),
+                          ),
+                          onPressed: _mostrarDialogoAgregarAdmin,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.deepPurple[700],
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 20,
+                              vertical: 12,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
                             ),
                           ),
                         ),

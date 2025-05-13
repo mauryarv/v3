@@ -8,8 +8,7 @@ import 'package:flutter_google_places_hoc081098/flutter_google_places_hoc081098.
 import 'package:flutter_google_places_hoc081098/google_maps_webservice_places.dart';
 import 'package:http/http.dart' as http;
 
-const String googleApiKey =
-    "AIzaSyApcSK58jVxe0m_QBfjtptqBvKI_-gKxvs"; // Reemplaza con tu API key
+const String googleApiKey = "AIzaSyApcSK58jVxe0m_QBfjtptqBvKI_-gKxvs";
 
 class AgregarEmpresaScreen extends StatefulWidget {
   const AgregarEmpresaScreen({super.key});
