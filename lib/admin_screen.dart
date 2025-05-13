@@ -1,5 +1,9 @@
 // ignore_for_file: library_private_types_in_public_api, use_build_context_synchronously
 
+import 'dart:convert';
+
+import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -23,6 +27,7 @@ class _AdminScreenState extends State<AdminScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final ScrollController _scrollController = ScrollController();
   final TextEditingController _searchController = TextEditingController();
+  bool _showPassword = true;
 
   int _limit = 10;
   bool _hasMore = true;
@@ -53,157 +58,353 @@ class _AdminScreenState extends State<AdminScreen> {
     final numeroController = TextEditingController();
     final nombreController = TextEditingController();
     final passwordController = TextEditingController();
-    final preguntaController = TextEditingController();
     final respuestaController = TextEditingController();
+    String preguntaSeleccionada = "¿Cuál es el nombre de tu primera mascota?";
+
+    final List<String> preguntasSeguridad = [
+      "¿Cuál es el nombre de tu primera mascota?",
+      "¿En qué ciudad naciste?",
+      "¿Cuál es tu comida favorita?",
+    ];
 
     await showDialog(
       context: context,
       barrierDismissible: false,
       builder:
-          (context) => AlertDialog(
-            title: const Text('Agregar Nuevo Administrador'),
-            content: SingleChildScrollView(
-              child: Form(
-                key: formKey,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    TextFormField(
-                      controller: numeroController,
-                      decoration: const InputDecoration(
-                        labelText: 'Número de empleado (7 dígitos)',
-                        prefixIcon: Icon(Icons.badge),
+          (context) => Dialog(
+            insetPadding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 24,
+            ),
+            child: SingleChildScrollView(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: MediaQuery.of(context).size.width * 0.9,
+                  maxHeight: MediaQuery.of(context).size.height * 0.8,
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const Text(
+                        'Agregar Nuevo Administrador',
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        textAlign: TextAlign.center,
                       ),
-                      keyboardType: TextInputType.number,
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Campo obligatorio';
-                        }
-                        if (value.length != 7 ||
-                            !RegExp(r'^[0-9]+$').hasMatch(value)) {
-                          return 'Debe tener exactamente 7 dígitos';
-                        }
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 12),
-                    TextFormField(
-                      controller: nombreController,
-                      decoration: const InputDecoration(
-                        labelText: 'Nombre completo',
-                        prefixIcon: Icon(Icons.person),
+                      const SizedBox(height: 20),
+                      Form(
+                        key: formKey,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            LayoutBuilder(
+                              builder: (context, constraints) {
+                                return SizedBox(
+                                  width: constraints.maxWidth,
+                                  child: TextFormField(
+                                    controller: numeroController,
+                                    decoration: InputDecoration(
+                                      labelText:
+                                          'Número de empleado (7 dígitos)',
+                                      prefixIcon: const Icon(Icons.badge),
+                                      border: const OutlineInputBorder(),
+                                      contentPadding:
+                                          const EdgeInsets.symmetric(
+                                            vertical: 12,
+                                            horizontal: 16,
+                                          ),
+                                      errorMaxLines: 2,
+                                    ),
+                                    keyboardType: TextInputType.number,
+                                    validator: (value) {
+                                      if (value == null || value.isEmpty) {
+                                        return 'Campo obligatorio';
+                                      }
+                                      if (value.length != 7 ||
+                                          !RegExp(
+                                            r'^[0-9]+$',
+                                          ).hasMatch(value)) {
+                                        return 'Debe tener exactamente 7 dígitos';
+                                      }
+                                      return null;
+                                    },
+                                  ),
+                                );
+                              },
+                            ),
+                            const SizedBox(height: 16),
+                            LayoutBuilder(
+                              builder: (context, constraints) {
+                                return SizedBox(
+                                  width: constraints.maxWidth,
+                                  child: TextFormField(
+                                    controller: nombreController,
+                                    decoration: InputDecoration(
+                                      labelText: 'Nombre completo',
+                                      prefixIcon: const Icon(Icons.person),
+                                      border: const OutlineInputBorder(),
+                                      contentPadding:
+                                          const EdgeInsets.symmetric(
+                                            vertical: 12,
+                                            horizontal: 16,
+                                          ),
+                                      errorMaxLines: 2,
+                                    ),
+                                    validator: (value) {
+                                      if (value == null || value.isEmpty) {
+                                        return 'Campo obligatorio';
+                                      }
+                                      return null;
+                                    },
+                                  ),
+                                );
+                              },
+                            ),
+                            const SizedBox(height: 16),
+
+                            // En tu widget:
+                            LayoutBuilder(
+                              builder: (context, constraints) {
+                                return SizedBox(
+                                  width: constraints.maxWidth,
+                                  child: TextFormField(
+                                    controller: passwordController,
+                                    decoration: InputDecoration(
+                                      labelText: 'Contraseña',
+                                      prefixIcon: const Icon(Icons.lock),
+                                      border: const OutlineInputBorder(),
+                                      contentPadding:
+                                          const EdgeInsets.symmetric(
+                                            vertical: 12,
+                                            horizontal: 16,
+                                          ),
+                                      errorMaxLines: 3,
+                                      helperText:
+                                          'Mínimo 8 caracteres, 1 mayúscula, 1 minúscula, 1 número y 1 caracter especial (!@#\$%^&*)',
+                                      suffixIcon: IconButton(
+                                        icon: Icon(
+                                          _showPassword
+                                              ? Icons.visibility
+                                              : Icons.visibility_off,
+                                          color: Colors.grey[600],
+                                        ),
+                                        onPressed: () {
+                                          setState(() {
+                                            _showPassword = !_showPassword;
+                                          });
+                                        },
+                                      ),
+                                    ),
+                                    obscureText:
+                                        !_showPassword, // Invertir el valor para el funcionamiento correcto
+                                    validator: (value) {
+                                      if (value == null || value.isEmpty) {
+                                        return 'Debe establecer una contraseña';
+                                      }
+
+                                      if (value.length < 8) {
+                                        return 'La contraseña debe tener al menos 8 caracteres';
+                                      }
+
+                                      if (!RegExp(r'[A-Z]').hasMatch(value)) {
+                                        return 'Debe contener al menos una letra mayúscula';
+                                      }
+
+                                      if (!RegExp(r'[a-z]').hasMatch(value)) {
+                                        return 'Debe contener al menos una letra minúscula';
+                                      }
+
+                                      if (!RegExp(r'[0-9]').hasMatch(value)) {
+                                        return 'Debe contener al menos un número';
+                                      }
+
+                                      if (!RegExp(
+                                        r'[!@#$%^&*]',
+                                      ).hasMatch(value)) {
+                                        return 'Debe contener al menos un caracter especial (!@#\$%^&*)';
+                                      }
+
+                                      return null;
+                                    },
+                                  ),
+                                );
+                              },
+                            ),
+                            const SizedBox(height: 16),
+                            LayoutBuilder(
+                              builder: (context, constraints) {
+                                return SizedBox(
+                                  width: constraints.maxWidth,
+                                  child: DropdownButtonFormField<String>(
+                                    value: preguntaSeleccionada,
+                                    decoration: InputDecoration(
+                                      labelText: 'Pregunta de seguridad',
+                                      prefixIcon: const Icon(Icons.security),
+                                      border: const OutlineInputBorder(),
+                                      contentPadding:
+                                          const EdgeInsets.symmetric(
+                                            vertical: 12,
+                                            horizontal: 16,
+                                          ),
+                                      errorMaxLines: 2,
+                                    ),
+                                    isExpanded: true,
+                                    items:
+                                        preguntasSeguridad
+                                            .map(
+                                              (pregunta) => DropdownMenuItem(
+                                                value: pregunta,
+                                                child: Text(
+                                                  pregunta,
+                                                  overflow:
+                                                      TextOverflow.visible,
+                                                  softWrap: true,
+                                                ),
+                                              ),
+                                            )
+                                            .toList(),
+                                    onChanged: (value) {
+                                      preguntaSeleccionada = value!;
+                                    },
+                                    validator: (value) {
+                                      if (value == null || value.isEmpty) {
+                                        return 'Seleccione una pregunta';
+                                      }
+                                      return null;
+                                    },
+                                  ),
+                                );
+                              },
+                            ),
+                            const SizedBox(height: 16),
+                            LayoutBuilder(
+                              builder: (context, constraints) {
+                                return SizedBox(
+                                  width: constraints.maxWidth,
+                                  child: TextFormField(
+                                    controller: respuestaController,
+                                    decoration: InputDecoration(
+                                      labelText: 'Respuesta de seguridad',
+                                      prefixIcon: const Icon(
+                                        Icons.question_answer,
+                                      ),
+                                      border: const OutlineInputBorder(),
+                                      contentPadding:
+                                          const EdgeInsets.symmetric(
+                                            vertical: 12,
+                                            horizontal: 16,
+                                          ),
+                                      errorMaxLines: 2,
+                                    ),
+                                    obscureText: true,
+                                    validator: (value) {
+                                      if (value == null || value.isEmpty) {
+                                        return 'Debe establecer una respuesta';
+                                      }
+                                      return null;
+                                    },
+                                  ),
+                                );
+                              },
+                            ),
+                          ],
+                        ),
                       ),
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Campo obligatorio';
-                        }
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 12),
-                    TextFormField(
-                      controller: passwordController,
-                      decoration: const InputDecoration(
-                        labelText: 'Contraseña temporal',
-                        prefixIcon: Icon(Icons.lock),
+                      const SizedBox(height: 24),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(context),
+                            child: const Text('Cancelar'),
+                          ),
+                          const SizedBox(width: 10),
+                          ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.deepPurple,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 24,
+                                vertical: 12,
+                              ),
+                            ),
+                            onPressed: () async {
+                              if (formKey.currentState!.validate()) {
+                                try {
+                                  final doc =
+                                      await _firestore
+                                          .collection('usuarios')
+                                          .doc(numeroController.text)
+                                          .get();
+
+                                  if (doc.exists &&
+                                      doc.data()?['rol'] == 'admin') {
+                                    _mostrarError(
+                                      'Ya existe un administrador con este número',
+                                    );
+                                    return;
+                                  }
+
+                                  final passwordHash =
+                                      sha256
+                                          .convert(
+                                            utf8.encode(
+                                              passwordController.text,
+                                            ),
+                                          )
+                                          .toString();
+                                  final respuestaHash =
+                                      sha256
+                                          .convert(
+                                            utf8.encode(
+                                              respuestaController.text,
+                                            ),
+                                          )
+                                          .toString();
+
+                                  await _firestore
+                                      .collection('usuarios')
+                                      .doc(numeroController.text)
+                                      .set({
+                                        'numero_empleado':
+                                            numeroController.text,
+                                        'nombre': nombreController.text,
+                                        'password': passwordHash,
+                                        'pregunta_seguridad':
+                                            preguntaSeleccionada,
+                                        'respuesta_seguridad': respuestaHash,
+                                        'rol': 'admin',
+                                        'fecha_registro':
+                                            FieldValue.serverTimestamp(),
+                                      }, SetOptions(merge: true));
+
+                                  Navigator.pop(context);
+                                  _mostrarExito(
+                                    'Administrador agregado exitosamente',
+                                  );
+                                } catch (e) {
+                                  _mostrarError(
+                                    'Error al agregar administrador: ${e.toString()}',
+                                  );
+                                }
+                              }
+                            },
+                            child: const Text(
+                              'Guardar',
+                              style: TextStyle(color: Colors.white),
+                            ),
+                          ),
+                        ],
                       ),
-                      obscureText: true,
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Debe establecer una contraseña';
-                        }
-                        if (value.length < 6) {
-                          return 'Mínimo 6 caracteres';
-                        }
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 12),
-                    TextFormField(
-                      controller: preguntaController,
-                      decoration: const InputDecoration(
-                        labelText: 'Pregunta de seguridad',
-                        prefixIcon: Icon(Icons.security),
-                        hintText: 'Ej: ¿Cuál es el nombre de tu mascota?',
-                      ),
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Debe establecer una pregunta';
-                        }
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 12),
-                    TextFormField(
-                      controller: respuestaController,
-                      decoration: const InputDecoration(
-                        labelText: 'Respuesta de seguridad',
-                        prefixIcon: Icon(Icons.question_answer),
-                      ),
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Debe establecer una respuesta';
-                        }
-                        return null;
-                      },
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Cancelar'),
-              ),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.deepPurple,
-                ),
-                onPressed: () async {
-                  if (formKey.currentState!.validate()) {
-                    try {
-                      final doc =
-                          await _firestore
-                              .collection('usuarios')
-                              .doc(numeroController.text)
-                              .get();
-
-                      if (doc.exists && doc.data()?['rol'] == 'admin') {
-                        _mostrarError(
-                          'Ya existe un administrador con este número',
-                        );
-                        return;
-                      }
-
-                      await _firestore
-                          .collection('usuarios')
-                          .doc(numeroController.text)
-                          .set({
-                            'numero_empleado': numeroController.text,
-                            'nombre': nombreController.text,
-                            'password': passwordController.text,
-                            'pregunta_seguridad': preguntaController.text,
-                            'respuesta_seguridad': respuestaController.text,
-                            'rol': 'admin',
-                            'fecha_registro': FieldValue.serverTimestamp(),
-                          }, SetOptions(merge: true));
-
-                      Navigator.pop(context);
-                      _mostrarExito('Administrador agregado exitosamente');
-                    } catch (e) {
-                      _mostrarError(
-                        'Error al agregar administrador: ${e.toString()}',
-                      );
-                    }
-                  }
-                },
-                child: const Text(
-                  'Guardar',
-                  style: TextStyle(color: Colors.white),
-                ),
-              ),
-            ],
           ),
     );
   }
@@ -425,7 +626,7 @@ class _AdminScreenState extends State<AdminScreen> {
               .toSet();
       final administradores =
           usuariosSnapshot.docs
-              .where((doc) => doc.data()['rol'] == 'admin')
+              .where((doc) => doc.data()['rol'] == 'administrador')
               .map((doc) => doc.id)
               .toSet();
       final profesoresEnExcel = <String>{};
@@ -552,7 +753,9 @@ class _AdminScreenState extends State<AdminScreen> {
           .map((doc) => doc['nombre']?.toString() ?? 'Desconocido')
           .toList();
     } catch (e) {
-      print('Error al obtener nombres: $e');
+      if (kDebugMode) {
+        print('Error al obtener nombres: $e');
+      }
       return List.filled(alumnosIds.length, 'Desconocido');
     }
   }
@@ -762,64 +965,63 @@ class _AdminScreenState extends State<AdminScreen> {
     return AppBar(
       title: LayoutBuilder(
         builder: (context, constraints) {
-          if (constraints.maxWidth < 400) {
-            return Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.school, color: Colors.white, size: 24),
-                const SizedBox(width: 8),
-                Text(
-                  'Visitas',
+          final isCompact = constraints.maxWidth < 400;
+          return Row(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.school, color: Colors.white, size: 24),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  isCompact ? 'Visitas' : 'Visitas Escolares',
                   style: GoogleFonts.poppins(
                     color: Colors.white,
                     fontWeight: FontWeight.w600,
-                    fontSize: 18,
+                    fontSize: isCompact ? 18 : 20,
                   ),
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
                 ),
-              ],
-            );
-          }
-          return Text(
-            'Visitas Escolares',
-            style: GoogleFonts.poppins(
-              color: Colors.white,
-              fontWeight: FontWeight.w600,
-              fontSize: 20,
-            ),
+              ),
+            ],
           );
         },
       ),
       actions: [
-        IconButton(
-          icon: const Icon(Icons.person_add, size: 22),
-          onPressed: _mostrarDialogoAgregarAdmin,
-          tooltip: 'Agregar administrador',
-          color: Colors.white,
-        ),
         LayoutBuilder(
           builder: (context, constraints) {
             final showFullName = constraints.maxWidth > 350;
-            return Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8.0),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.person, color: Colors.amber[200], size: 20),
-                  if (showFullName) ...[
-                    const SizedBox(width: 4),
-                    Flexible(
-                      child: Text(
-                        _adminName,
-                        style: GoogleFonts.roboto(
-                          color: Colors.white,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
+            return ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth:
+                    showFullName
+                        ? constraints.maxWidth * 0.3
+                        : 40, // Ancho mínimo para el ícono
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.person, color: Colors.amber[200], size: 20),
+                    if (showFullName) ...[
+                      const SizedBox(width: 4),
+                      Flexible(
+                        child: Text(
+                          _adminName,
+                          style: GoogleFonts.roboto(
+                            color: Colors.white,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 1,
                         ),
-                        maxLines: 1,
                       ),
-                    ),
+                    ],
                   ],
-                ],
+                ),
               ),
             );
           },
@@ -1141,7 +1343,7 @@ class _AdminScreenState extends State<AdminScreen> {
                             color: Colors.white,
                           ),
                           label: const Text(
-                            'Agregar Admin',
+                            'Agregar Administrador',
                             style: TextStyle(color: Colors.white),
                           ),
                           onPressed: _mostrarDialogoAgregarAdmin,

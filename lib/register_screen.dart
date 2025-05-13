@@ -27,6 +27,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool _obscurePassword = true;
   bool _obscureAnswer = true;
   bool _isLoading = false;
+  bool _userExists = false;
+  bool _userComplete = false;
 
   // Password validation states
   bool _hasMinLength = false;
@@ -74,6 +76,38 @@ class _RegisterScreenState extends State<RegisterScreen> {
       _hasValidLength = _isProfessorLength || _isStudentLength;
       _isNumberValid = isNumeric && _hasValidLength;
     });
+
+    if (_isNumberValid) {
+      _checkUserExists();
+    }
+  }
+
+  Future<void> _checkUserExists() async {
+    String number = _numberController.text.trim();
+    DocumentSnapshot doc =
+        await _firestore.collection("usuarios").doc(number).get();
+
+    setState(() {
+      _userExists = doc.exists;
+
+      if (_userExists) {
+        Map<String, dynamic>? data = doc.data() as Map<String, dynamic>?;
+        _userComplete =
+            data != null &&
+            data.containsKey('password') &&
+            data['password'] != null &&
+            data.containsKey('pregunta_seguridad') &&
+            data['pregunta_seguridad'] != null &&
+            data.containsKey('respuesta_seguridad') &&
+            data['respuesta_seguridad'] != null;
+      }
+    });
+
+    if (!_userExists) {
+      _showErrorSnackBar('Este número no está registrado en el sistema');
+    } else if (_userComplete) {
+      _showInfoSnackBar('Este usuario ya está registrado. Inicia sesión.');
+    }
   }
 
   void _validatePassword() {
@@ -106,11 +140,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
         backgroundColor: Colors.red,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        margin: EdgeInsets.only(
-          bottom: MediaQuery.of(context).size.height - 150,
-          left: 20,
-          right: 20,
-        ),
+      ),
+    );
+  }
+
+  void _showInfoSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.blue,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
     );
   }
@@ -122,17 +162,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
         backgroundColor: Colors.green,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        margin: EdgeInsets.only(
-          bottom: MediaQuery.of(context).size.height - 150,
-          left: 20,
-          right: 20,
-        ),
       ),
     );
   }
 
   Future<void> register() async {
-    // Validate empty fields first
+    // Validar campos vacíos primero
     if (_numberController.text.isEmpty ||
         _passwordController.text.isEmpty ||
         _answerController.text.isEmpty) {
@@ -140,22 +175,19 @@ class _RegisterScreenState extends State<RegisterScreen> {
       return;
     }
 
-    // Validate field formats
+    // Validar formatos de campos
     if (!_isNumberValid || !_isPasswordValid || !_isAnswerValid) {
       String errorMessage = 'Por favor corrige los siguientes errores:\n';
 
       if (!_isNumberValid) {
-        if (!_isNumberNumeric) {
-          errorMessage += '• El número solo debe contener dígitos\n';
-        }
+        if (!_isNumberNumeric) errorMessage += '• Solo se permiten números\n';
         if (!_hasValidLength) {
-          errorMessage +=
-              '• El número debe tener 7 (profesor) o 10 (alumno) dígitos\n';
+          errorMessage += '• Debe tener 7 (profesor) o 10 (alumno) dígitos\n';
         }
       }
 
       if (!_isPasswordValid) {
-        errorMessage += '• La contraseña no cumple con los requisitos:\n';
+        errorMessage += '• La contraseña no cumple los requisitos:\n';
         if (!_hasMinLength) errorMessage += '  - Mínimo 8 caracteres\n';
         if (!_hasUpperCase) errorMessage += '  - Al menos una mayúscula\n';
         if (!_hasLowerCase) errorMessage += '  - Al menos una minúscula\n';
@@ -166,69 +198,54 @@ class _RegisterScreenState extends State<RegisterScreen> {
       }
 
       if (!_isAnswerValid) {
-        errorMessage += '• La respuesta de seguridad no puede estar vacía\n';
+        errorMessage += '• La respuesta no puede estar vacía\n';
       }
 
       _showErrorSnackBar(errorMessage);
       return;
     }
 
-    setState(() {
-      _isLoading = true;
-    });
+    if (!_userExists) {
+      _showErrorSnackBar('No puedes registrarte con este número');
+      return;
+    }
+
+    if (_userComplete) {
+      _showErrorSnackBar('Este usuario ya está completamente registrado');
+      return;
+    }
+
+    setState(() => _isLoading = true);
 
     try {
       String number = _numberController.text.trim();
-      String password = _passwordController.text.trim();
-      String securityAnswer = _answerController.text.trim();
 
-      DocumentSnapshot docSnapshot =
-          await _firestore.collection("usuarios").doc(number).get();
+      // Preparar datos para actualizar
+      Map<String, dynamic> updateData = {
+        'password':
+            sha256
+                .convert(utf8.encode(_passwordController.text.trim()))
+                .toString(),
+        'pregunta_seguridad': _selectedQuestion,
+        'respuesta_seguridad':
+            sha256
+                .convert(utf8.encode(_answerController.text.trim()))
+                .toString(),
+      };
 
-      if (docSnapshot.exists) {
-        _showErrorSnackBar('El número $number ya está registrado');
-        return;
-      }
+      // Actualizar solo los campos necesarios
+      await _firestore.collection("usuarios").doc(number).update(updateData);
 
-      String passwordHash = sha256.convert(utf8.encode(password)).toString();
-      String securityAnswerHash =
-          sha256.convert(utf8.encode(securityAnswer)).toString();
-
-      await _firestore.collection("usuarios").doc(number).set({
-        "password": passwordHash,
-        "pregunta_seguridad": _selectedQuestion,
-        "respuesta_seguridad": securityAnswerHash,
-        "rol": _isStudentLength ? "alumno" : "profesor",
-      });
-
-      _showSuccessSnackBar('¡Registro exitoso! Redirigiendo...');
-
+      _showSuccessSnackBar('¡Datos de seguridad actualizados exitosamente!');
       Navigator.pushAndRemoveUntil(
         context,
         MaterialPageRoute(builder: (context) => const LoginScreen()),
-        (Route<dynamic> route) => false,
+        (route) => false,
       );
-    } on FirebaseException catch (e) {
-      String errorMessage = 'Error de Firebase: ';
-      switch (e.code) {
-        case 'permission-denied':
-          errorMessage += 'No tienes permiso para realizar esta acción';
-          break;
-        case 'unavailable':
-          errorMessage += 'Servicio no disponible. Intenta más tarde';
-          break;
-        default:
-          errorMessage += e.message ?? 'Error desconocido';
-      }
-      _showErrorSnackBar(errorMessage);
     } catch (e) {
-      _showErrorSnackBar('Error inesperado: ${e.toString()}');
+      _showErrorSnackBar('Error: ${e.toString()}');
     } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -538,7 +555,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       (_isNumberValid &&
                               _isPasswordValid &&
                               _isAnswerValid &&
-                              !_isLoading)
+                              !_isLoading &&
+                              _userExists &&
+                              !_userComplete)
                           ? register
                           : null,
                   style: ElevatedButton.styleFrom(
