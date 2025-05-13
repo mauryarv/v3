@@ -19,21 +19,18 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final _formKey = GlobalKey<FormState>();
 
-  List<Map<String, String>> empresas = [];
-  List<String> empresasNombres = [];
+  List<Map<String, dynamic>> empresas = [];
   List<String> grupos = [];
   List<String> profesores = [];
   Map<String, List<Map<String, String>>> alumnosPorGrupo = {};
 
-  String? titulo;
-  String? empresaSeleccionada;
+  int? _empresaSeleccionadaIndex;
   String? grupoSeleccionado;
-  String? profesorSeleccionado;
-  Map<String, List<String>> alumnosSeleccionados = {};
+  List<String> profesoresSeleccionados = [];
+  List<String> alumnosSeleccionados = [];
   DateTime? fechaSeleccionada;
   TimeOfDay? horaSeleccionada;
-  TextEditingController tituloController = TextEditingController();
-  Map<String, bool> seleccionarTodosPorGrupo = {};
+  TextEditingController observacionesController = TextEditingController();
   bool _isLoading = false;
 
   @override
@@ -44,11 +41,15 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
     if (widget.visita != null) {
       var data = widget.visita!.data() as Map<String, dynamic>;
       setState(() {
-        titulo = data["titulo"];
-        tituloController.text = titulo ?? "";
-        empresaSeleccionada = data["empresa"];
         grupoSeleccionado = data["grupo"];
-        profesorSeleccionado = data["profesor"];
+        profesoresSeleccionados = List<String>.from(data["profesores"] ?? []);
+        observacionesController.text = data["observaciones"] ?? "";
+
+        // Buscar índice de la empresa por ubicación
+        final ubicacion = data["ubicacion"];
+        _empresaSeleccionadaIndex = empresas.indexWhere(
+          (emp) => emp['ubicacion'] == ubicacion,
+        );
 
         Timestamp? fechaHoraTimestamp = data["fecha_hora"];
         if (fechaHoraTimestamp != null) {
@@ -57,46 +58,10 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
         }
 
         List<dynamic> alumnosGuardados = data["alumnos"] ?? [];
-        alumnosSeleccionados = {};
-
-        for (var alumnoId in alumnosGuardados) {
-          _firestore.collection("usuarios").doc(alumnoId).get().then((doc) {
-            if (doc.exists) {
-              String grupoAlumno = doc["grupo"];
-              setState(() {
-                if (!alumnosSeleccionados.containsKey(grupoAlumno)) {
-                  alumnosSeleccionados[grupoAlumno] = [];
-                }
-                alumnosSeleccionados[grupoAlumno]!.add(alumnoId);
-              });
-            }
-          });
-        }
+        alumnosSeleccionados =
+            alumnosGuardados.map((e) => e.toString()).toList();
       });
     }
-  }
-
-  String? _obtenerUbicacionEmpresa(String? nombreEmpresa) {
-    if (nombreEmpresa == null) return null;
-    final empresa = empresas.firstWhere(
-      (emp) => emp['nombre'] == nombreEmpresa,
-      orElse: () => {'ubicacion': 'No disponible'},
-    );
-    return empresa['ubicacion'];
-  }
-
-  void _toggleSeleccionarTodos(String grupo) {
-    setState(() {
-      bool seleccionarTodos = seleccionarTodosPorGrupo[grupo] ?? false;
-      seleccionarTodosPorGrupo[grupo] = !seleccionarTodos;
-
-      if (seleccionarTodosPorGrupo[grupo]!) {
-        alumnosSeleccionados[grupo] =
-            alumnosPorGrupo[grupo]!.map((alumno) => alumno['id']!).toList();
-      } else {
-        alumnosSeleccionados[grupo] = [];
-      }
-    });
   }
 
   Future<void> _cargarDatos() async {
@@ -105,11 +70,11 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
         _isLoading = true;
       });
 
-      // Cargar empresas con ubicación
+      // Cargar empresas (solo ubicación)
       QuerySnapshot empresasSnapshot =
           await _firestore.collection("empresas").get();
 
-      // Cargar grupos únicos de alumnos
+      // Cargar grupos de alumnos
       QuerySnapshot alumnosSnapshot =
           await _firestore
               .collection("usuarios")
@@ -127,11 +92,9 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
         empresas =
             empresasSnapshot.docs.map((doc) {
               return {
-                'nombre': doc["nombre"].toString(),
                 'ubicacion': doc["ubicacion"]?.toString() ?? 'No disponible',
               };
             }).toList();
-        empresasNombres = empresas.map((e) => e['nombre']!).toList();
 
         grupos =
             alumnosSnapshot.docs
@@ -174,9 +137,8 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
 
       setState(() {
         alumnosPorGrupo[grupo] = alumnosGrupo;
-        if (!alumnosSeleccionados.containsKey(grupo)) {
-          alumnosSeleccionados[grupo] = [];
-        }
+        alumnosSeleccionados =
+            alumnosGrupo.map((alumno) => alumno['id']!).toList();
         _isLoading = false;
       });
     } catch (e) {
@@ -292,8 +254,13 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
   Future<void> _guardarVisita() async {
     if (!_formKey.currentState!.validate()) return;
 
-    if (alumnosSeleccionados[grupoSeleccionado!]?.isEmpty ?? true) {
-      _mostrarError("Por favor selecciona al menos un alumno");
+    if (_empresaSeleccionadaIndex == null) {
+      _mostrarError("Por favor selecciona una ubicación de empresa");
+      return;
+    }
+
+    if (profesoresSeleccionados.isEmpty) {
+      _mostrarError("Por favor selecciona al menos un profesor");
       return;
     }
 
@@ -313,18 +280,15 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
         _isLoading = true;
       });
 
-      // Obtener la ubicación de la empresa seleccionada
-      String ubicacionEmpresa =
-          _obtenerUbicacionEmpresa(empresaSeleccionada) ?? 'No disponible';
+      final ubicacionEmpresa =
+          empresas[_empresaSeleccionadaIndex!]['ubicacion'];
 
       Map<String, dynamic> visitaData = {
-        "titulo": titulo,
-        "empresa": empresaSeleccionada,
-        "ubicacion": ubicacionEmpresa, // Agregar la ubicación aquí
+        "ubicacion": ubicacionEmpresa,
         "grupo": grupoSeleccionado,
-        "profesor": profesorSeleccionado,
-        "alumnos":
-            alumnosSeleccionados.values.expand((x) => x).toSet().toList(),
+        "profesores": profesoresSeleccionados,
+        "alumnos": alumnosSeleccionados,
+        "observaciones": observacionesController.text,
         "fecha_hora": Timestamp.fromDate(fechaHoraCombinada),
         "fecha_creacion":
             widget.visita != null
@@ -480,84 +444,44 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            TextFormField(
-                              controller: tituloController,
-                              decoration: InputDecoration(
-                                labelText: "Título de la visita",
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                                filled: true,
-                                fillColor: Colors.grey[50],
-                              ),
-                              validator: (value) {
-                                if (value == null || value.isEmpty) {
-                                  return 'Por favor ingresa un título';
-                                }
-                                return null;
-                              },
-                              onChanged: (value) {
-                                setState(() {
-                                  titulo = value;
-                                });
-                              },
-                            ),
                             const SizedBox(height: 20),
                             Row(
                               children: [
                                 Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      DropdownButtonFormField<String>(
-                                        value: empresaSeleccionada,
-                                        hint: const Text(
-                                          "Selecciona una empresa",
+                                  child: DropdownButtonFormField<int>(
+                                    value: _empresaSeleccionadaIndex,
+                                    hint: const Text(
+                                      "Selecciona un lugar",
+                                    ),
+                                    items: List.generate(empresas.length, (
+                                      index,
+                                    ) {
+                                      return DropdownMenuItem<int>(
+                                        value: index,
+                                        child: Text(
+                                          empresas[index]['ubicacion'],
                                         ),
-                                        items:
-                                            empresasNombres.map((empresa) {
-                                              return DropdownMenuItem<String>(
-                                                value: empresa,
-                                                child: Text(empresa),
-                                              );
-                                            }).toList(),
-                                        onChanged: (value) {
-                                          setState(() {
-                                            empresaSeleccionada = value;
-                                          });
-                                        },
-                                        decoration: InputDecoration(
-                                          border: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(
-                                              10,
-                                            ),
-                                          ),
-                                          filled: true,
-                                          fillColor: Colors.grey[50],
-                                        ),
-                                        validator: (value) {
-                                          if (value == null || value.isEmpty) {
-                                            return 'Selecciona una empresa';
-                                          }
-                                          return null;
-                                        },
-                                        isExpanded: true,
+                                      );
+                                    }),
+                                    onChanged: (value) {
+                                      setState(() {
+                                        _empresaSeleccionadaIndex = value;
+                                      });
+                                    },
+                                    decoration: InputDecoration(
+                                      border: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(10),
                                       ),
-                                      if (empresaSeleccionada != null)
-                                        Padding(
-                                          padding: const EdgeInsets.only(
-                                            top: 8.0,
-                                          ),
-                                          child: Text(
-                                            "Ubicación: ${_obtenerUbicacionEmpresa(empresaSeleccionada)}",
-                                            style: TextStyle(
-                                              color: Colors.grey[600],
-                                              fontSize: 14,
-                                            ),
-                                          ),
-                                        ),
-                                    ],
+                                      filled: true,
+                                      fillColor: Colors.grey[50],
+                                    ),
+                                    validator: (value) {
+                                      if (value == null) {
+                                        return 'Selecciona un lugar';
+                                      }
+                                      return null;
+                                    },
+                                    isExpanded: true,
                                   ),
                                 ),
                                 const SizedBox(width: 10),
@@ -567,7 +491,7 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
                                     color: Colors.blue,
                                   ),
                                   onPressed: _navegarAgregarEmpresa,
-                                  tooltip: 'Agregar nueva empresa',
+                                  tooltip: 'Agregar nueva ubicación',
                                 ),
                               ],
                             ),
@@ -606,35 +530,79 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
                               isExpanded: true,
                             ),
                             const SizedBox(height: 20),
-                            DropdownButtonFormField<String>(
-                              value: profesorSeleccionado,
-                              hint: const Text("Selecciona un profesor"),
-                              items:
-                                  profesores.map((profesor) {
-                                    return DropdownMenuItem<String>(
-                                      value: profesor,
-                                      child: Text(profesor),
-                                    );
-                                  }).toList(),
-                              onChanged: (value) {
-                                setState(() {
-                                  profesorSeleccionado = value;
-                                });
-                              },
+                            const Text(
+                              "Selecciona los profesores:",
+                              style: TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                            const SizedBox(height: 10),
+                            Card(
+                              elevation: 2,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.all(8.0),
+                                child: Column(
+                                  children: [
+                                    ConstrainedBox(
+                                      constraints: BoxConstraints(
+                                        maxHeight: size.height * 0.3,
+                                      ),
+                                      child: ListView.builder(
+                                        shrinkWrap: true,
+                                        itemCount: profesores.length,
+                                        itemBuilder: (context, index) {
+                                          final profesor = profesores[index];
+                                          return CheckboxListTile(
+                                            title: Text(profesor),
+                                            value: profesoresSeleccionados
+                                                .contains(profesor),
+                                            onChanged: (bool? selected) {
+                                              setState(() {
+                                                if (selected == true) {
+                                                  profesoresSeleccionados.add(
+                                                    profesor,
+                                                  );
+                                                } else {
+                                                  profesoresSeleccionados
+                                                      .remove(profesor);
+                                                }
+                                              });
+                                            },
+                                          );
+                                        },
+                                      ),
+                                    ),
+                                    if (profesoresSeleccionados.isNotEmpty)
+                                      Padding(
+                                        padding: const EdgeInsets.only(
+                                          top: 8.0,
+                                        ),
+                                        child: Text(
+                                          "Profesores seleccionados: ${profesoresSeleccionados.length}",
+                                          style: TextStyle(
+                                            color: Colors.grey[600],
+                                            fontStyle: FontStyle.italic,
+                                          ),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 20),
+                            TextFormField(
+                              controller: observacionesController,
                               decoration: InputDecoration(
+                                labelText: "Observaciones",
                                 border: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(10),
                                 ),
                                 filled: true,
                                 fillColor: Colors.grey[50],
                               ),
-                              validator: (value) {
-                                if (value == null || value.isEmpty) {
-                                  return 'Selecciona un profesor';
-                                }
-                                return null;
-                              },
-                              isExpanded: true,
+                              maxLines: 3,
+                              keyboardType: TextInputType.multiline,
                             ),
                             const SizedBox(height: 20),
                             Row(
@@ -714,7 +682,7 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
                             if (grupoSeleccionado != null &&
                                 alumnosPorGrupo[grupoSeleccionado] != null) ...[
                               const Text(
-                                "Selecciona los alumnos:",
+                                "Alumnos del grupo seleccionado:",
                                 style: TextStyle(fontWeight: FontWeight.bold),
                               ),
                               const SizedBox(height: 10),
@@ -725,68 +693,36 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
                                 ),
                                 child: Padding(
                                   padding: const EdgeInsets.all(8.0),
-                                  child: Column(
-                                    children: [
-                                      CheckboxListTile(
-                                        title: const Text(
-                                          "Seleccionar/Deseleccionar Todos",
-                                        ),
-                                        value:
-                                            seleccionarTodosPorGrupo[grupoSeleccionado] ??
-                                            false,
-                                        onChanged: (_) {
-                                          _toggleSeleccionarTodos(
-                                            grupoSeleccionado!,
-                                          );
-                                        },
-                                        controlAffinity:
-                                            ListTileControlAffinity.leading,
-                                      ),
-                                      const Divider(),
-                                      ConstrainedBox(
-                                        constraints: BoxConstraints(
-                                          maxHeight: size.height * 0.3,
-                                        ),
-                                        child: ListView.builder(
-                                          shrinkWrap: true,
-                                          itemCount:
-                                              alumnosPorGrupo[grupoSeleccionado]!
-                                                  .length,
-                                          itemBuilder: (context, index) {
-                                            final alumno =
-                                                alumnosPorGrupo[grupoSeleccionado]![index];
-                                            return CheckboxListTile(
-                                              title: Text(alumno['nombre']!),
-                                              value:
-                                                  alumnosSeleccionados[grupoSeleccionado]
-                                                      ?.contains(
-                                                        alumno['id'],
-                                                      ) ??
-                                                  false,
-                                              onChanged: (bool? selected) {
-                                                setState(() {
-                                                  if (selected == true) {
-                                                    if (!alumnosSeleccionados
-                                                        .containsKey(
-                                                          grupoSeleccionado,
-                                                        )) {
-                                                      alumnosSeleccionados[grupoSeleccionado!] =
-                                                          [];
-                                                    }
-                                                    alumnosSeleccionados[grupoSeleccionado!]!
-                                                        .add(alumno['id']!);
-                                                  } else {
-                                                    alumnosSeleccionados[grupoSeleccionado!]!
-                                                        .remove(alumno['id']);
-                                                  }
-                                                });
-                                              },
-                                            );
-                                          },
-                                        ),
-                                      ),
-                                    ],
+                                  child: ConstrainedBox(
+                                    constraints: BoxConstraints(
+                                      maxHeight: size.height * 0.3,
+                                    ),
+                                    child: ListView.builder(
+                                      shrinkWrap: true,
+                                      itemCount:
+                                          alumnosPorGrupo[grupoSeleccionado]!
+                                              .length,
+                                      itemBuilder: (context, index) {
+                                        final alumno =
+                                            alumnosPorGrupo[grupoSeleccionado]![index];
+                                        return ListTile(
+                                          title: Text(alumno['nombre']!),
+                                          leading: const Icon(
+                                            Icons.person,
+                                            color: Colors.blue,
+                                          ),
+                                        );
+                                      },
+                                    ),
                                   ),
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              Text(
+                                "Total de alumnos: ${alumnosPorGrupo[grupoSeleccionado]!.length}",
+                                style: TextStyle(
+                                  color: Colors.grey[600],
+                                  fontStyle: FontStyle.italic,
                                 ),
                               ),
                             ],

@@ -18,6 +18,7 @@ class _DetalleVisitaScreenState extends State<DetalleVisitaScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   Map<String, dynamic>? visitaDetalles;
   List<String> nombresAlumnos = [];
+  List<String> nombresProfesores = [];
   bool _isLoading = true;
 
   @override
@@ -39,15 +40,23 @@ class _DetalleVisitaScreenState extends State<DetalleVisitaScreen> {
       if (visitaSnapshot.exists) {
         setState(() {
           visitaDetalles = visitaSnapshot.data() as Map<String, dynamic>;
+          // Los profesores ya están como nombres en el documento
+          nombresProfesores =
+              visitaDetalles!['profesores'] != null
+                  ? List<String>.from(visitaDetalles!['profesores'])
+                  : [];
         });
 
         if (visitaDetalles != null && visitaDetalles!['alumnos'] != null) {
-          final alumnosIds = List<String>.from(visitaDetalles!['alumnos']);
-          await _cargarNombresAlumnos(alumnosIds);
+          await _cargarNombresAlumnos(
+            (visitaDetalles!['alumnos'] as List)
+                .map((e) => e.toString())
+                .toList(),
+          );
         }
       }
     } catch (e) {
-      _mostrarError('Error al cargar los detalles de la visita');
+      _mostrarError('Error al cargar los detalles de la visita: $e');
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -55,19 +64,25 @@ class _DetalleVisitaScreenState extends State<DetalleVisitaScreen> {
 
   Future<void> _cargarNombresAlumnos(List<String> alumnosIds) async {
     try {
-      final nombres = <String>[];
-
-      for (final alumnoId in alumnosIds) {
-        final alumnoSnapshot =
-            await _firestore.collection('usuarios').doc(alumnoId).get();
-        if (alumnoSnapshot.exists) {
-          nombres.add(alumnoSnapshot['nombre'] ?? 'Nombre no disponible');
-        }
+      if (alumnosIds.isEmpty) {
+        setState(() => nombresAlumnos = []);
+        return;
       }
+
+      final query = _firestore
+          .collection('usuarios')
+          .where(FieldPath.documentId, whereIn: alumnosIds);
+
+      final snapshot = await query.get();
+      final nombres =
+          snapshot.docs
+              .map((doc) => doc['nombre']?.toString() ?? 'Nombre no disponible')
+              .toList();
 
       setState(() => nombresAlumnos = nombres);
     } catch (e) {
-      _mostrarError('Error al cargar los nombres de los alumnos');
+      _mostrarError('Error al cargar los nombres de los alumnos: $e');
+      setState(() => nombresAlumnos = ['Error al cargar nombres']);
     }
   }
 
@@ -145,14 +160,18 @@ class _DetalleVisitaScreenState extends State<DetalleVisitaScreen> {
     );
   }
 
-  Widget _buildAlumnosList() {
+  Widget _buildListaPersonas({
+    required String titulo,
+    required List<String> nombres,
+    required IconData icono,
+  }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 8),
           child: Text(
-            'Alumnos Asignados',
+            titulo,
             style: GoogleFonts.poppins(
               fontSize: 18,
               fontWeight: FontWeight.w600,
@@ -160,42 +179,54 @@ class _DetalleVisitaScreenState extends State<DetalleVisitaScreen> {
             ),
           ),
         ),
-        if (nombresAlumnos.isEmpty)
-          const Center(child: CircularProgressIndicator())
-        else
-          Card(
-            elevation: 2,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                children:
-                    nombresAlumnos
-                        .map(
-                          (nombre) => Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 8),
-                            child: Row(
-                              children: [
-                                Icon(
-                                  Icons.person,
-                                  size: 20,
-                                  color: Colors.grey[600],
-                                ),
-                                const SizedBox(width: 16),
-                                Text(
-                                  nombre,
-                                  style: GoogleFonts.roboto(fontSize: 16),
-                                ),
-                              ],
-                            ),
-                          ),
-                        )
-                        .toList(),
-              ),
-            ),
+        Card(
+          elevation: 2,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
           ),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child:
+                nombres.isEmpty
+                    ? Text(
+                      'No hay $titulo',
+                      style: GoogleFonts.roboto(
+                        fontSize: 16,
+                        color: Colors.grey[600],
+                      ),
+                    )
+                    : Column(
+                      children:
+                          nombres
+                              .map(
+                                (nombre) => Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 8,
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        icono,
+                                        size: 20,
+                                        color: Colors.grey[600],
+                                      ),
+                                      const SizedBox(width: 16),
+                                      Expanded(
+                                        child: Text(
+                                          nombre,
+                                          style: GoogleFonts.roboto(
+                                            fontSize: 16,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              )
+                              .toList(),
+                    ),
+          ),
+        ),
       ],
     );
   }
@@ -216,57 +247,77 @@ class _DetalleVisitaScreenState extends State<DetalleVisitaScreen> {
               )
               : visitaDetalles == null
               ? Center(
-                child: Text(
-                  'No se encontraron detalles de la visita',
-                  style: GoogleFonts.poppins(),
-                ),
-              )
-              : SingleChildScrollView(
-                padding: EdgeInsets.symmetric(
-                  horizontal: isMobile ? 16 : 24,
-                  vertical: 16,
-                ),
                 child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    _buildInfoCard(
-                      'Título',
-                      visitaDetalles!['titulo'] ?? 'Sin título',
-                      Icons.title,
-                    ),
-                    _buildInfoCard(
-                      'Empresa',
-                      visitaDetalles!['empresa'] ?? 'Desconocida',
-                      Icons.business,
-                    ),
-                    // Nueva tarjeta para la ubicación
-                    _buildInfoCard(
-                      'Ubicación',
-                      visitaDetalles!['ubicacion'] ?? 'Ubicación no disponible',
-                      Icons.location_on,
-                    ),
-                    _buildInfoCard(
-                      'Profesor',
-                      visitaDetalles!['profesor'] ?? 'No asignado',
-                      Icons.school,
-                    ),
-                    _buildInfoCard(
-                      'Fecha y Hora',
-                      visitaDetalles!['fecha_hora'] != null
-                          ? DateFormat('dd/MM/yyyy - HH:mm').format(
-                            (visitaDetalles!['fecha_hora'] as Timestamp)
-                                .toDate(),
-                          )
-                          : 'No definida',
-                      Icons.calendar_today,
-                    ),
-                    _buildInfoCard(
-                      'Grupo',
-                      visitaDetalles!['grupo'] ?? 'No asignado',
-                      Icons.group,
+                    const Icon(
+                      Icons.error_outline,
+                      size: 50,
+                      color: Colors.red,
                     ),
                     const SizedBox(height: 16),
-                    _buildAlumnosList(),
+                    Text(
+                      'No se encontraron detalles de la visita',
+                      style: GoogleFonts.poppins(fontSize: 18),
+                    ),
+                    const SizedBox(height: 16),
+                    ElevatedButton(
+                      onPressed: _cargarDetallesVisita,
+                      child: const Text('Reintentar'),
+                    ),
                   ],
+                ),
+              )
+              : RefreshIndicator(
+                onRefresh: _cargarDetallesVisita,
+                child: SingleChildScrollView(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: isMobile ? 16 : 24,
+                    vertical: 16,
+                  ),
+                  child: Column(
+                    children: [
+                      _buildInfoCard(
+                        'Ubicación',
+                        visitaDetalles!['ubicacion']?.toString() ??
+                            'Ubicación no disponible',
+                        Icons.location_on,
+                      ),
+                      _buildInfoCard(
+                        'Grupo',
+                        visitaDetalles!['grupo']?.toString() ?? 'No asignado',
+                        Icons.group,
+                      ),
+                      _buildInfoCard(
+                        'Fecha y Hora',
+                        visitaDetalles!['fecha_hora'] != null
+                            ? DateFormat('dd/MM/yyyy - HH:mm').format(
+                              (visitaDetalles!['fecha_hora'] as Timestamp)
+                                  .toDate(),
+                            )
+                            : 'No definida',
+                        Icons.calendar_today,
+                      ),
+                      _buildInfoCard(
+                        'Observaciones',
+                        visitaDetalles!['observaciones']?.toString() ??
+                            'Sin observaciones',
+                        Icons.note,
+                      ),
+                      const SizedBox(height: 16),
+                      _buildListaPersonas(
+                        titulo: 'Profesores Asignados',
+                        nombres: nombresProfesores,
+                        icono: Icons.school,
+                      ),
+                      const SizedBox(height: 16),
+                      _buildListaPersonas(
+                        titulo: 'Alumnos Asignados',
+                        nombres: nombresAlumnos,
+                        icono: Icons.person,
+                      ),
+                    ],
+                  ),
                 ),
               ),
     );

@@ -3,7 +3,6 @@
 import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -342,7 +341,7 @@ class _AdminScreenState extends State<AdminScreen> {
                                           .get();
 
                                   if (doc.exists &&
-                                      doc.data()?['rol'] == 'admin') {
+                                      doc.data()?['rol'] == 'administrador') {
                                     _mostrarError(
                                       'Ya existe un administrador con este número',
                                     );
@@ -377,7 +376,7 @@ class _AdminScreenState extends State<AdminScreen> {
                                         'pregunta_seguridad':
                                             preguntaSeleccionada,
                                         'respuesta_seguridad': respuestaHash,
-                                        'rol': 'admin',
+                                        'rol': 'administrador',
                                         'fecha_registro':
                                             FieldValue.serverTimestamp(),
                                       }, SetOptions(merge: true));
@@ -739,27 +738,6 @@ class _AdminScreenState extends State<AdminScreen> {
     }
   }
 
-  Future<List<String>> _obtenerNombresAlumnos(List<dynamic> alumnosIds) async {
-    if (alumnosIds.isEmpty) return [];
-
-    try {
-      final query = _firestore
-          .collection('usuarios')
-          .where(FieldPath.documentId, whereIn: alumnosIds.take(10).toList())
-          .limit(10);
-
-      final snapshot = await query.get();
-      return snapshot.docs
-          .map((doc) => doc['nombre']?.toString() ?? 'Desconocido')
-          .toList();
-    } catch (e) {
-      if (kDebugMode) {
-        print('Error al obtener nombres: $e');
-      }
-      return List.filled(alumnosIds.length, 'Desconocido');
-    }
-  }
-
   void _filterVisitas(String query) {
     setState(() {
       _searchText = query.toLowerCase();
@@ -1073,14 +1051,12 @@ class _AdminScreenState extends State<AdminScreen> {
     );
   }
 
+  // En la función _buildVisitaCard, reemplaza el contenido con:
+
   Widget _buildVisitaCard(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
-    final titulo = data["titulo"] ?? "Sin título";
-    final empresa = data["empresa"] ?? "Desconocida";
     final ubicacion = data["ubicacion"] ?? "Ubicación no disponible";
     final grupo = data["grupo"] ?? "No asignado";
-    final profesor = data["profesor"] ?? "No asignado";
-    final alumnos = data["alumnos"] as List<dynamic>? ?? [];
     final timestamp = data["fecha_hora"] as Timestamp?;
     final fechaHoraTexto =
         timestamp != null
@@ -1093,80 +1069,54 @@ class _AdminScreenState extends State<AdminScreen> {
         margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         elevation: 4,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        child: FutureBuilder<List<String>>(
-          future: _obtenerNombresAlumnos(alumnos),
-          builder: (context, snapshot) {
-            final alumnosTexto =
-                snapshot.hasData
-                    ? snapshot.data!.join(', ')
-                    : snapshot.connectionState == ConnectionState.waiting
-                    ? "Cargando..."
-                    : "No disponibles";
-
-            return Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Expanded(
-                        child: Text(
-                          titulo,
-                          style: GoogleFonts.poppins(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.blue[800],
-                          ),
-                        ),
+                  Expanded(
+                    child: Text(
+                      "ID: ${doc.id}",
+                      style: GoogleFonts.poppins(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.blue[800],
                       ),
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          IconButton(
-                            icon: Icon(Icons.folder_open, color: Colors.orange),
-                            onPressed: () => _confirmOpenFiles(doc.id),
-                            tooltip: 'Revisar Archivos',
-                          ),
-                          IconButton(
-                            icon: Icon(Icons.edit, color: Colors.blue),
-                            onPressed: () => _editarVisita(doc),
-                          ),
-                          IconButton(
-                            icon: Icon(Icons.delete, color: Colors.red),
-                            onPressed: () => _eliminarVisita(doc.id),
-                          ),
-                        ],
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: Icon(Icons.folder_open, color: Colors.orange),
+                        onPressed: () => _confirmOpenFiles(doc.id),
+                        tooltip: 'Revisar Archivos',
+                      ),
+                      IconButton(
+                        icon: Icon(Icons.edit, color: Colors.blue),
+                        onPressed: () => _editarVisita(doc),
+                      ),
+                      IconButton(
+                        icon: Icon(Icons.delete, color: Colors.red),
+                        onPressed: () => _eliminarVisita(doc.id),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 8),
-                  _buildInfoRow(Icons.business, empresa),
-                  _buildInfoRow(Icons.location_on, "Ubicación: $ubicacion"),
-                  _buildInfoRow(Icons.people, "Grupo: $grupo"),
-                  _buildInfoRow(Icons.person, "Profesor: $profesor"),
-                  _buildInfoRow(Icons.calendar_today, fechaHoraTexto),
-                  const SizedBox(height: 4),
-                  Text(
-                    "Alumnos:",
-                    style: GoogleFonts.roboto(
-                      fontWeight: FontWeight.w500,
-                      color: Colors.grey[700],
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    alumnosTexto,
-                    style: GoogleFonts.roboto(
-                      fontSize: 14,
-                      color: Colors.grey[800],
-                    ),
-                  ),
                 ],
               ),
-            );
-          },
+              const SizedBox(height: 8),
+              _buildInfoRow(Icons.location_on, "Lugar: $ubicacion"),
+              _buildInfoRow(Icons.people, "Grupo: $grupo"),
+              _buildInfoRow(
+                Icons.calendar_today,
+                "Fecha y hora: $fechaHoraTexto",
+              ),
+            ],
+          ),
         ),
       ),
     );

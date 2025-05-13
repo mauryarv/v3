@@ -1,13 +1,9 @@
 // ignore_for_file: library_private_types_in_public_api, use_build_context_synchronously
 
-import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:file_picker/file_picker.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:v3/detalle_visita_screen.dart';
 import 'package:v3/login_screen.dart';
 
@@ -20,7 +16,6 @@ class ProfesorScreen extends StatefulWidget {
 
 class _ProfesorScreenState extends State<ProfesorScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final FirebaseStorage _storage = FirebaseStorage.instance;
   final TextEditingController _searchController = TextEditingController();
 
   String? profesorId;
@@ -29,17 +24,6 @@ class _ProfesorScreenState extends State<ProfesorScreen> {
   List<Map<String, dynamic>> _filteredVisitas = [];
   String _searchText = '';
   bool _isLoading = true;
-
-  File? _archivo;
-  String? _tipoSeleccionado;
-  bool _cargandoSubida = false;
-  final List<String> _tiposDocumentos = [
-    'CURP',
-    'INE',
-    'Constancia_Medica',
-    'Comprobante_Domicilio',
-  ];
-  Map<String, String> _documentosSubidos = {};
 
   @override
   void initState() {
@@ -60,10 +44,7 @@ class _ProfesorScreenState extends State<ProfesorScreen> {
       profesorId = prefs.getString('user_id');
       profesorNombre = prefs.getString('user_name') ?? "Profesor";
 
-      await Future.wait([
-        _cargarVisitasAsignadas(),
-        _cargarDocumentosProfesor(),
-      ]);
+      await _cargarVisitasAsignadas();
     } catch (e) {
       _mostrarError('Error al cargar datos: $e');
     } finally {
@@ -127,139 +108,6 @@ class _ProfesorScreenState extends State<ProfesorScreen> {
     });
   }
 
-  Future<void> _cargarDocumentosProfesor() async {
-    try {
-      if (profesorId == null) return;
-
-      final snapshot =
-          await _firestore.collection('usuarios').doc(profesorId).get();
-
-      if (snapshot.exists) {
-        final docs =
-            snapshot.data()?['documentos'] as Map<String, dynamic>? ?? {};
-        setState(() {
-          _documentosSubidos = Map<String, String>.from(docs);
-        });
-      }
-    } catch (e) {
-      _mostrarError('Error al cargar documentos: $e');
-    }
-  }
-
-  Future<void> _seleccionarArchivo() async {
-    if (_tipoSeleccionado == null) {
-      _mostrarMensaje('Selecciona un tipo de documento', Colors.orange);
-      return;
-    }
-
-    final resultado = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['pdf'],
-    );
-
-    if (resultado != null) {
-      final archivo = File(resultado.files.single.path!);
-      if (archivo.lengthSync() > 2 * 1024 * 1024) {
-        _mostrarMensaje('El archivo no debe exceder 2MB', Colors.red);
-        return;
-      }
-      setState(() => _archivo = archivo);
-    }
-  }
-
-  Future<void> _subirDocumento() async {
-    if (_tipoSeleccionado == null || _archivo == null || profesorId == null) {
-      return;
-    }
-
-    setState(() => _cargandoSubida = true);
-    try {
-      final nombreArchivo =
-          '${_tipoSeleccionado}_${DateTime.now().millisecondsSinceEpoch}.pdf';
-      final rutaStorage = 'profesores/$profesorId/$nombreArchivo';
-      final referencia = _storage.ref().child(rutaStorage);
-      await referencia.putFile(_archivo!);
-      final url = await referencia.getDownloadURL();
-
-      if (_documentosSubidos.containsKey(_tipoSeleccionado!)) {
-        final urlAnterior = _documentosSubidos[_tipoSeleccionado!]!;
-        await _storage.refFromURL(urlAnterior).delete();
-      }
-
-      await _firestore.collection('usuarios').doc(profesorId).set({
-        'documentos': {..._documentosSubidos, _tipoSeleccionado!: url},
-      }, SetOptions(merge: true));
-
-      await _cargarDocumentosProfesor();
-
-      _mostrarMensaje('Documento subido con éxito', Colors.green);
-      setState(() {
-        _archivo = null;
-      });
-    } catch (e) {
-      _mostrarMensaje('Error al subir documento: $e', Colors.red);
-    } finally {
-      if (mounted) setState(() => _cargandoSubida = false);
-    }
-  }
-
-  Future<void> _eliminarDocumento(String tipoDocumento) async {
-    if (profesorId == null || !_documentosSubidos.containsKey(tipoDocumento)) {
-      return;
-    }
-
-    try {
-      setState(() => _isLoading = true);
-
-      final url = _documentosSubidos[tipoDocumento]!;
-      await _storage.refFromURL(url).delete();
-
-      final nuevosDocumentos = Map<String, String>.from(_documentosSubidos);
-      nuevosDocumentos.remove(tipoDocumento);
-
-      await _firestore.collection('usuarios').doc(profesorId).update({
-        'documentos': nuevosDocumentos,
-      });
-
-      await _cargarDocumentosProfesor();
-
-      _mostrarMensaje('Documento eliminado con éxito', Colors.green);
-    } catch (e) {
-      _mostrarError('Error al eliminar documento: $e');
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
-    }
-  }
-
-  void _mostrarDialogoConfirmacionEliminar(String tipoDocumento) {
-    showDialog(
-      context: context,
-      builder:
-          (context) => AlertDialog(
-            title: const Text('Eliminar documento'),
-            content: Text(
-              '¿Estás seguro de que quieres eliminar ${_getNombreLegible(tipoDocumento)}?',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Cancelar'),
-              ),
-              TextButton(
-                onPressed: () {
-                  Navigator.pop(context);
-                  _eliminarDocumento(tipoDocumento);
-                },
-                child: const Text(
-                  'Eliminar',
-                  style: TextStyle(color: Colors.red),
-                ),
-              ),
-            ],
-          ),
-    );
-  }
-
   void _mostrarDetallesVisita(Map<String, dynamic> visita) {
     Navigator.push(
       context,
@@ -283,16 +131,6 @@ class _ProfesorScreenState extends State<ProfesorScreen> {
     }
   }
 
-  void _mostrarMensaje(String texto, Color color) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(texto),
-        backgroundColor: color,
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
-  }
-
   void _mostrarError(String mensaje) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -301,21 +139,6 @@ class _ProfesorScreenState extends State<ProfesorScreen> {
         behavior: SnackBarBehavior.floating,
       ),
     );
-  }
-
-  String _getNombreLegible(String tipo) {
-    switch (tipo) {
-      case 'CURP':
-        return 'CURP';
-      case 'INE':
-        return 'INE';
-      case 'Constancia_Medica':
-        return 'Constancia Médica';
-      case 'Comprobante_Domicilio':
-        return 'Comprobante de Domicilio';
-      default:
-        return tipo.replaceAll('_', ' ');
-    }
   }
 
   PreferredSizeWidget _buildAppBar() {
@@ -466,146 +289,6 @@ class _ProfesorScreenState extends State<ProfesorScreen> {
     }
   }
 
-  Widget _buildDocumentosSection() {
-    return Card(
-      elevation: 2,
-      margin: const EdgeInsets.only(bottom: 16),
-      child: ExpansionTile(
-        title: Text(
-          'Documentos del Profesor',
-          style: GoogleFonts.poppins(fontWeight: FontWeight.w500),
-        ),
-        initiallyExpanded: true,
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Column(
-              children: [
-                const SizedBox(height: 8),
-                DropdownButtonFormField<String>(
-                  value: _tipoSeleccionado,
-                  hint: Text(
-                    'Selecciona un documento',
-                    style: GoogleFonts.roboto(),
-                  ),
-                  items:
-                      _tiposDocumentos.map((tipo) {
-                        final subido = _documentosSubidos.containsKey(tipo);
-                        return DropdownMenuItem(
-                          value: tipo,
-                          child: Text(
-                            '${_getNombreLegible(tipo)}${subido ? ' (subido)' : ''}',
-                            style: GoogleFonts.roboto(),
-                          ),
-                        );
-                      }).toList(),
-                  onChanged:
-                      (value) => setState(() {
-                        _tipoSeleccionado = value;
-                        _archivo = null;
-                      }),
-                  decoration: InputDecoration(
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                if (_tipoSeleccionado != null) ...[
-                  OutlinedButton.icon(
-                    icon: const Icon(Icons.upload_file),
-                    label: const Text('Seleccionar archivo PDF'),
-                    onPressed: _seleccionarArchivo,
-                  ),
-                  if (_archivo != null) ...[
-                    const SizedBox(height: 16),
-                    ListTile(
-                      leading: const Icon(
-                        Icons.picture_as_pdf,
-                        color: Colors.red,
-                      ),
-                      title: Text(_archivo!.path.split('/').last),
-                      trailing: IconButton(
-                        icon: const Icon(Icons.close),
-                        onPressed: () => setState(() => _archivo = null),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    ElevatedButton(
-                      onPressed: _subirDocumento,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blue,
-                        minimumSize: const Size(double.infinity, 50),
-                      ),
-                      child:
-                          _cargandoSubida
-                              ? const CircularProgressIndicator(
-                                color: Colors.white,
-                              )
-                              : const Text('Subir Documento'),
-                    ),
-                  ],
-                ],
-                const SizedBox(height: 16),
-                if (_documentosSubidos.isNotEmpty) ...[
-                  const Divider(),
-                  Text(
-                    'Documentos subidos:',
-                    style: GoogleFonts.roboto(fontWeight: FontWeight.w500),
-                  ),
-                  const SizedBox(height: 8),
-                  ..._documentosSubidos.entries.map(
-                    (entry) => ListTile(
-                      leading: const Icon(
-                        Icons.check_circle,
-                        color: Colors.green,
-                      ),
-                      title: Text(_getNombreLegible(entry.key)),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          IconButton(
-                            icon: const Icon(
-                              Icons.visibility,
-                              color: Colors.blue,
-                            ),
-                            onPressed: () async {
-                              final url = entry.value;
-                              if (await canLaunchUrl(Uri.parse(url))) {
-                                await launchUrl(
-                                  Uri.parse(url),
-                                  mode: LaunchMode.externalApplication,
-                                );
-                              } else {
-                                _mostrarMensaje(
-                                  'No se pudo abrir el documento',
-                                  Colors.red,
-                                );
-                              }
-                            },
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.delete, color: Colors.red),
-                            onPressed:
-                                () => _mostrarDialogoConfirmacionEliminar(
-                                  entry.key,
-                                ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 8),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -618,7 +301,6 @@ class _ProfesorScreenState extends State<ProfesorScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    _buildDocumentosSection(),
                     const SizedBox(height: 24),
                     Text(
                       'Mis Visitas Asignadas',
