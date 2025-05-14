@@ -47,9 +47,14 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
 
         // Buscar índice de la empresa por ubicación
         final ubicacion = data["ubicacion"];
-        _empresaSeleccionadaIndex = empresas.indexWhere(
-          (emp) => emp['ubicacion'] == ubicacion,
-        );
+        if (ubicacion != null) {
+          final index = empresas.indexWhere(
+            (emp) => emp['ubicacion'] == ubicacion,
+          );
+          if (index != -1) {
+            _empresaSeleccionadaIndex = index;
+          }
+        }
 
         Timestamp? fechaHoraTimestamp = data["fecha_hora"];
         if (fechaHoraTimestamp != null) {
@@ -88,32 +93,53 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
               .where("rol", isEqualTo: "profesor")
               .get();
 
+      List<Map<String, dynamic>> empresasTemp =
+          empresasSnapshot.docs.map((doc) {
+            return {
+              'ubicacion': doc["ubicacion"]?.toString() ?? 'No disponible',
+            };
+          }).toList();
+
+      List<String> gruposTemp =
+          alumnosSnapshot.docs
+              .map((doc) => doc["grupo"].toString())
+              .toSet()
+              .toList();
+
+      List<String> profesoresTemp =
+          profesoresSnapshot.docs
+              .map((doc) => doc["nombre"].toString())
+              .toList();
+
       setState(() {
-        empresas =
-            empresasSnapshot.docs.map((doc) {
-              return {
-                'ubicacion': doc["ubicacion"]?.toString() ?? 'No disponible',
-              };
-            }).toList();
-
-        grupos =
-            alumnosSnapshot.docs
-                .map((doc) => doc["grupo"].toString())
-                .toSet()
-                .toList();
-
-        profesores =
-            profesoresSnapshot.docs
-                .map((doc) => doc["nombre"].toString())
-                .toList();
-
+        empresas = empresasTemp;
+        grupos = gruposTemp;
+        profesores = profesoresTemp;
         _isLoading = false;
       });
+
+      // Después de cargar las empresas, establecer los valores de la visita si existe
+      if (widget.visita != null && mounted) {
+        var data = widget.visita!.data() as Map<String, dynamic>;
+        setState(() {
+          final ubicacion = data["ubicacion"];
+          if (ubicacion != null) {
+            final index = empresasTemp.indexWhere(
+              (emp) => emp['ubicacion'] == ubicacion,
+            );
+            if (index != -1) {
+              _empresaSeleccionadaIndex = index;
+            }
+          }
+        });
+      }
     } catch (e) {
-      setState(() {
-        _isLoading = false;
-      });
-      _mostrarError("Error al cargar datos: $e");
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+        _mostrarError("Error al cargar datos: $e");
+      }
     }
   }
 
@@ -121,6 +147,7 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
     try {
       setState(() {
         _isLoading = true;
+        alumnosSeleccionados = []; // Limpia los alumnos seleccionados
       });
 
       QuerySnapshot alumnosSnapshot =
@@ -137,6 +164,7 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
 
       setState(() {
         alumnosPorGrupo[grupo] = alumnosGrupo;
+        // Opcional: seleccionar todos los alumnos del nuevo grupo automáticamente
         alumnosSeleccionados =
             alumnosGrupo.map((alumno) => alumno['id']!).toList();
         _isLoading = false;
@@ -449,7 +477,14 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
                               children: [
                                 Expanded(
                                   child: DropdownButtonFormField<int>(
-                                    value: _empresaSeleccionadaIndex,
+                                    value:
+                                        _empresaSeleccionadaIndex != null &&
+                                                _empresaSeleccionadaIndex! >=
+                                                    0 &&
+                                                _empresaSeleccionadaIndex! <
+                                                    empresas.length
+                                            ? _empresaSeleccionadaIndex
+                                            : null,
                                     hint: const Text("Selecciona un lugar"),
                                     items: List.generate(empresas.length, (
                                       index,
@@ -505,12 +540,15 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
                                     );
                                   }).toList(),
                               onChanged: (value) {
+                                if (value == null || !grupos.contains(value)) {
+                                  return;
+                                }
+
                                 setState(() {
                                   grupoSeleccionado = value;
+                                  alumnosPorGrupo.remove(grupoSeleccionado);
                                 });
-                                if (value != null) {
-                                  _cargarAlumnosPorGrupo(value);
-                                }
+                                _cargarAlumnosPorGrupo(value);
                               },
                               decoration: InputDecoration(
                                 border: OutlineInputBorder(
