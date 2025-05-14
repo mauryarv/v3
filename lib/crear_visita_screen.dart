@@ -450,9 +450,7 @@ class _CrearVisitaScreenState extends State<CrearVisitaScreen> {
                                 Expanded(
                                   child: DropdownButtonFormField<int>(
                                     value: _empresaSeleccionadaIndex,
-                                    hint: const Text(
-                                      "Selecciona un lugar",
-                                    ),
+                                    hint: const Text("Selecciona un lugar"),
                                     items: List.generate(empresas.length, (
                                       index,
                                     ) {
