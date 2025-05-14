@@ -1,4 +1,4 @@
-// ignore_for_file: library_private_types_in_public_api, use_build_context_synchronously, deprecated_member_use
+// ignore_for_file: library_private_types_in_public_api, deprecated_member_use
 
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -27,37 +27,148 @@ class _ArchivosAlumnoScreenState extends State<ArchivosAlumnoScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   bool _isLoading = false;
 
+  final List<String> _motivosRechazo = [
+    'Documento ilegible',
+    'Documento no coincide con el tipo requerido',
+    'Documento vencido',
+    'Falta información importante',
+    'Documento no válido',
+    'Otro motivo',
+  ];
+
   Future<void> _actualizarEstadoArchivo(
     Map<String, dynamic> archivo,
-    String nuevoEstado,
-  ) async {
+    String nuevoEstado, {
+    String? motivoRechazo,
+  }) async {
     try {
-      setState(() {
-        _isLoading = true;
-      });
+      setState(() => _isLoading = true);
 
-      DocumentReference visitaRef = _firestore
+      final visitaRef = _firestore
           .collection("visitas_escolares")
           .doc(widget.visitaId);
 
-      await visitaRef.update({
-        "archivos_pendientes": FieldValue.arrayRemove([archivo]),
-      });
+      await _firestore.runTransaction((transaction) async {
+        final snapshot = await transaction.get(visitaRef);
+        if (!snapshot.exists) return;
 
-      archivo["estado"] = nuevoEstado;
-      await visitaRef.update({
-        "archivos_pendientes": FieldValue.arrayUnion([archivo]),
+        final archivosPendientes = List.from(
+          snapshot.data()?['archivos_pendientes'] ?? [],
+        );
+
+        // Eliminar TODAS las versiones de este archivo del mismo tipo para el alumno
+        archivosPendientes.removeWhere(
+          (a) =>
+              a['alumnoId'] == widget.alumnoId && a['tipo'] == archivo['tipo'],
+        );
+
+        // Agregar la nueva versión actualizada
+        final nuevoArchivo = {
+          ...archivo,
+          'estado': nuevoEstado,
+          'fechaSubida': Timestamp.now(),
+          if (motivoRechazo != null) 'motivoRechazo': motivoRechazo,
+        };
+
+        archivosPendientes.add(nuevoArchivo);
+
+        transaction.update(visitaRef, {
+          'archivos_pendientes': archivosPendientes,
+        });
       });
 
       _mostrarExito("Estado actualizado correctamente");
     } catch (e) {
       _mostrarError("Error al actualizar el estado del archivo: $e");
     } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _mostrarDialogoMotivoRechazo(
+    Map<String, dynamic> archivo,
+  ) async {
+    String? motivoSeleccionado;
+    final otroMotivoController = TextEditingController();
+
+    final confirmado = await showDialog<bool>(
+      context: context,
+      builder:
+          (context) => StatefulBuilder(
+            builder: (context, setState) {
+              return AlertDialog(
+                title: const Text('Motivo de rechazo'),
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    DropdownButtonFormField<String>(
+                      value: motivoSeleccionado,
+                      items:
+                          _motivosRechazo.map((motivo) {
+                            return DropdownMenuItem(
+                              value: motivo,
+                              child: Text(motivo),
+                            );
+                          }).toList(),
+                      onChanged:
+                          (value) => setState(() => motivoSeleccionado = value),
+                      decoration: const InputDecoration(
+                        labelText: 'Seleccione motivo',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    if (motivoSeleccionado == 'Otro motivo')
+                      Padding(
+                        padding: const EdgeInsets.only(top: 12),
+                        child: TextField(
+                          controller: otroMotivoController,
+                          decoration: const InputDecoration(
+                            labelText: 'Especifique motivo',
+                            border: OutlineInputBorder(),
+                          ),
+                          maxLines: 2,
+                        ),
+                      ),
+                  ],
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context, false),
+                    child: const Text('Cancelar'),
+                  ),
+                  TextButton(
+                    onPressed: () {
+                      if (motivoSeleccionado == null ||
+                          (motivoSeleccionado == 'Otro motivo' &&
+                              otroMotivoController.text.isEmpty)) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Seleccione un motivo válido'),
+                          ),
+                        );
+                        return;
+                      }
+                      Navigator.pop(context, true);
+                    },
+                    child: const Text('Confirmar'),
+                  ),
+                ],
+              );
+            },
+          ),
+    );
+
+    if (confirmado == true && motivoSeleccionado != null) {
+      final motivoFinal =
+          motivoSeleccionado == 'Otro motivo'
+              ? otroMotivoController.text
+              : motivoSeleccionado!;
+
+      await _actualizarEstadoArchivo(
+        {...archivo, 'motivoRechazo': motivoFinal},
+        "rechazado",
+        motivoRechazo: motivoFinal,
+      );
     }
   }
 
@@ -104,71 +215,6 @@ class _ArchivosAlumnoScreenState extends State<ArchivosAlumnoScreen> {
           ),
         ),
       ),
-      actions: <Widget>[
-        PopupMenuButton<String>(
-          icon: const Icon(Icons.more_vert, color: Colors.white),
-          onSelected: (value) {
-            if (value == 'about') {
-              showDialog(
-                context: context,
-                builder: (BuildContext context) {
-                  return AlertDialog(
-                    title: Text(
-                      'Acerca de la aplicación',
-                      style: GoogleFonts.poppins(),
-                    ),
-                    content: Text(
-                      'Esta aplicación fue desarrollada para facilitar la gestión de visitas escolares del CECyT 3. '
-                      'Su objetivo es proporcionar una herramienta eficiente para administradores, profesores y alumnos.',
-                      style: GoogleFonts.roboto(),
-                    ),
-                    actions: <Widget>[
-                      TextButton(
-                        onPressed: () => Navigator.of(context).pop(),
-                        child: const Text('Cerrar'),
-                      ),
-                    ],
-                  );
-                },
-              );
-            } else if (value == 'credits') {
-              showDialog(
-                context: context,
-                builder: (BuildContext context) {
-                  return AlertDialog(
-                    title: Text('Créditos', style: GoogleFonts.poppins()),
-                    content: Text(
-                      'Aplicación desarrollada por Reyes Vaca Mauricio Alberto.\n'
-                      '© 2025 Todos los derechos reservados.',
-                      style: GoogleFonts.roboto(),
-                    ),
-                    actions: <Widget>[
-                      TextButton(
-                        onPressed: () => Navigator.of(context).pop(),
-                        child: const Text('Cerrar'),
-                      ),
-                    ],
-                  );
-                },
-              );
-            }
-          },
-          itemBuilder:
-              (BuildContext context) => <PopupMenuEntry<String>>[
-                PopupMenuItem<String>(
-                  value: 'about',
-                  child: Text(
-                    'Acerca de la aplicación',
-                    style: GoogleFonts.roboto(),
-                  ),
-                ),
-                PopupMenuItem<String>(
-                  value: 'credits',
-                  child: Text('Créditos', style: GoogleFonts.roboto()),
-                ),
-              ],
-        ),
-      ],
     );
   }
 
@@ -240,6 +286,17 @@ class _ArchivosAlumnoScreenState extends State<ArchivosAlumnoScreen> {
                   ),
                 ],
               ),
+              if (estado == "rechazado" && archivo["motivoRechazo"] != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    "Motivo: ${archivo["motivoRechazo"]}",
+                    style: GoogleFonts.roboto(
+                      color: Colors.red[700],
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                ),
               const SizedBox(height: 12),
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
@@ -255,8 +312,7 @@ class _ArchivosAlumnoScreenState extends State<ArchivosAlumnoScreen> {
                   _buildActionButton(
                     icon: Icons.close,
                     color: Colors.red,
-                    onPressed:
-                        () => _actualizarEstadoArchivo(archivo, "rechazado"),
+                    onPressed: () => _mostrarDialogoMotivoRechazo(archivo),
                     tooltip: "Rechazar archivo",
                   ),
                 ],
@@ -298,15 +354,11 @@ class _ArchivosAlumnoScreenState extends State<ArchivosAlumnoScreen> {
     return Scaffold(
       appBar: _buildAppBar(),
       body: Column(
-        crossAxisAlignment: CrossAxisAlignment.center, // Cambiado a center
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          // Título personalizado debajo del AppBar - ahora centrado
           Center(
-            // Widget Center añadido
             child: Padding(
-              padding: const EdgeInsets.symmetric(
-                vertical: 8.0, // Mantenemos solo padding vertical
-              ),
+              padding: const EdgeInsets.symmetric(vertical: 8.0),
               child: Text(
                 widget.nombreAlumno,
                 style: GoogleFonts.caveat(
@@ -317,7 +369,6 @@ class _ArchivosAlumnoScreenState extends State<ArchivosAlumnoScreen> {
               ),
             ),
           ),
-          // Contenido principal (lista de archivos)
           Expanded(
             child:
                 _isLoading
