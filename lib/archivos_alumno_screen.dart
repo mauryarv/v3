@@ -9,14 +9,12 @@ class ArchivosAlumnoScreen extends StatefulWidget {
   final String visitaId;
   final String alumnoId;
   final String nombreAlumno;
-  final List<Map<String, dynamic>> archivos;
 
   const ArchivosAlumnoScreen({
     super.key,
     required this.visitaId,
     required this.alumnoId,
     required this.nombreAlumno,
-    required this.archivos,
   });
 
   @override
@@ -25,7 +23,6 @@ class ArchivosAlumnoScreen extends StatefulWidget {
 
 class _ArchivosAlumnoScreenState extends State<ArchivosAlumnoScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  bool _isLoading = false;
 
   final List<String> _motivosRechazo = [
     'Documento ilegible',
@@ -42,8 +39,6 @@ class _ArchivosAlumnoScreenState extends State<ArchivosAlumnoScreen> {
     String? motivoRechazo,
   }) async {
     try {
-      setState(() => _isLoading = true);
-
       final visitaRef = _firestore
           .collection("visitas_escolares")
           .doc(widget.visitaId);
@@ -81,7 +76,7 @@ class _ArchivosAlumnoScreenState extends State<ArchivosAlumnoScreen> {
     } catch (e) {
       _mostrarError("Error al actualizar el estado del archivo: $e");
     } finally {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) {}
     }
   }
 
@@ -96,63 +91,145 @@ class _ArchivosAlumnoScreenState extends State<ArchivosAlumnoScreen> {
       builder:
           (context) => StatefulBuilder(
             builder: (context, setState) {
-              return AlertDialog(
-                title: const Text('Motivo de rechazo'),
-                content: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    DropdownButtonFormField<String>(
-                      value: motivoSeleccionado,
-                      items:
-                          _motivosRechazo.map((motivo) {
-                            return DropdownMenuItem(
-                              value: motivo,
-                              child: Text(motivo),
-                            );
-                          }).toList(),
-                      onChanged:
-                          (value) => setState(() => motivoSeleccionado = value),
-                      decoration: const InputDecoration(
-                        labelText: 'Seleccione motivo',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    if (motivoSeleccionado == 'Otro motivo')
-                      Padding(
-                        padding: const EdgeInsets.only(top: 12),
-                        child: TextField(
-                          controller: otroMotivoController,
-                          decoration: const InputDecoration(
-                            labelText: 'Especifique motivo',
-                            border: OutlineInputBorder(),
-                          ),
-                          maxLines: 2,
-                        ),
-                      ),
-                  ],
+              return Dialog(
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
                 ),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(context, false),
-                    child: const Text('Cancelar'),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: MediaQuery.of(context).size.width * 0.9,
+                    maxHeight: MediaQuery.of(context).size.height * 0.7,
                   ),
-                  TextButton(
-                    onPressed: () {
-                      if (motivoSeleccionado == null ||
-                          (motivoSeleccionado == 'Otro motivo' &&
-                              otroMotivoController.text.isEmpty)) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Seleccione un motivo válido'),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text(
+                          'Motivo de rechazo',
+                          style: GoogleFonts.poppins(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
                           ),
-                        );
-                        return;
-                      }
-                      Navigator.pop(context, true);
-                    },
-                    child: const Text('Confirmar'),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 20),
+                        Container(
+                          constraints: BoxConstraints(
+                            maxWidth: MediaQuery.of(context).size.width * 0.8,
+                          ),
+                          child: DropdownButtonFormField<String>(
+                            value: motivoSeleccionado,
+                            isExpanded:
+                                true, // Hace que el dropdown ocupe todo el ancho disponible
+                            items:
+                                _motivosRechazo.map((motivo) {
+                                  return DropdownMenuItem(
+                                    value: motivo,
+                                    child: Text(
+                                      motivo,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: GoogleFonts.roboto(
+                                        color: Colors.black,
+                                      ),
+                                    ),
+                                  );
+                                }).toList(),
+                            onChanged:
+                                (value) =>
+                                    setState(() => motivoSeleccionado = value),
+                            decoration: InputDecoration(
+                              labelText: 'Seleccione motivo',
+                              labelStyle: GoogleFonts.roboto(),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 14,
+                              ),
+                            ),
+                            style: GoogleFonts.roboto(),
+                          ),
+                        ),
+                        if (motivoSeleccionado == 'Otro motivo') ...[
+                          const SizedBox(height: 16),
+                          TextField(
+                            controller: otroMotivoController,
+                            decoration: InputDecoration(
+                              labelText: 'Especifique motivo',
+                              labelStyle: GoogleFonts.roboto(),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 14,
+                              ),
+                            ),
+                            maxLines: 3,
+                            maxLength: 200,
+                            style: GoogleFonts.roboto(),
+                          ),
+                        ],
+                        const SizedBox(height: 24),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(context, false),
+                              child: Text(
+                                'Cancelar',
+                                style: GoogleFonts.roboto(
+                                  color: Colors.blue,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 16),
+                            ElevatedButton(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.blue,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 24,
+                                  vertical: 12,
+                                ),
+                              ),
+                              onPressed: () {
+                                if (motivoSeleccionado == null ||
+                                    (motivoSeleccionado == 'Otro motivo' &&
+                                        otroMotivoController.text.isEmpty)) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        'Seleccione un motivo válido',
+                                        style: GoogleFonts.roboto(),
+                                      ),
+                                      backgroundColor: Colors.red,
+                                    ),
+                                  );
+                                  return;
+                                }
+                                Navigator.pop(context, true);
+                              },
+                              child: Text(
+                                'Confirmar',
+                                style: GoogleFonts.roboto(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
-                ],
+                ),
               );
             },
           ),
@@ -289,11 +366,21 @@ class _ArchivosAlumnoScreenState extends State<ArchivosAlumnoScreen> {
               if (estado == "rechazado" && archivo["motivoRechazo"] != null)
                 Padding(
                   padding: const EdgeInsets.only(top: 8),
-                  child: Text(
-                    "Motivo: ${archivo["motivoRechazo"]}",
-                    style: GoogleFonts.roboto(
-                      color: Colors.red[700],
-                      fontStyle: FontStyle.italic,
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.red[50],
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      "Motivo: ${archivo["motivoRechazo"]}",
+                      style: GoogleFonts.roboto(
+                        color: Colors.red[700],
+                        fontStyle: FontStyle.italic,
+                      ),
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                 ),
@@ -370,36 +457,76 @@ class _ArchivosAlumnoScreenState extends State<ArchivosAlumnoScreen> {
             ),
           ),
           Expanded(
-            child:
-                _isLoading
-                    ? const Center(
-                      child: CircularProgressIndicator(
-                        valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
-                      ),
-                    )
-                    : widget.archivos.isEmpty
-                    ? Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(20.0),
-                        child: Text(
-                          "No hay archivos para mostrar",
-                          style: GoogleFonts.roboto(
-                            fontSize: 16,
-                            color: Colors.grey[600],
-                          ),
+            child: StreamBuilder<DocumentSnapshot>(
+              stream:
+                  _firestore
+                      .collection("visitas_escolares")
+                      .doc(widget.visitaId)
+                      .snapshots(),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(
+                    child: CircularProgressIndicator(
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
+                    ),
+                  );
+                }
+
+                if (!snapshot.hasData || snapshot.data == null) {
+                  return Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(20.0),
+                      child: Text(
+                        "No hay datos de la visita",
+                        style: GoogleFonts.roboto(
+                          fontSize: 16,
+                          color: Colors.grey[600],
                         ),
                       ),
-                    )
-                    : ListView.builder(
-                      padding: EdgeInsets.symmetric(
-                        horizontal: isMobile ? 8 : 24,
-                        vertical: 16,
-                      ),
-                      itemCount: widget.archivos.length,
-                      itemBuilder: (context, index) {
-                        return _buildArchivoCard(widget.archivos[index]);
-                      },
                     ),
+                  );
+                }
+
+                final data = snapshot.data!.data() as Map<String, dynamic>?;
+                final archivosPendientes = List.from(
+                  data?['archivos_pendientes'] ?? [],
+                );
+
+                // Filtrar solo los archivos del alumno actual
+                final archivosAlumno =
+                    archivosPendientes
+                        .where(
+                          (archivo) => archivo['alumnoId'] == widget.alumnoId,
+                        )
+                        .toList();
+
+                if (archivosAlumno.isEmpty) {
+                  return Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(20.0),
+                      child: Text(
+                        "No hay archivos para mostrar",
+                        style: GoogleFonts.roboto(
+                          fontSize: 16,
+                          color: Colors.grey[600],
+                        ),
+                      ),
+                    ),
+                  );
+                }
+
+                return ListView.builder(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: isMobile ? 8 : 24,
+                    vertical: 16,
+                  ),
+                  itemCount: archivosAlumno.length,
+                  itemBuilder: (context, index) {
+                    return _buildArchivoCard(archivosAlumno[index]);
+                  },
+                );
+              },
+            ),
           ),
         ],
       ),

@@ -55,7 +55,6 @@ class _AprobarArchivosScreenState extends State<AprobarArchivosScreen> {
     );
   }
 
-  // Cambiamos el tipo de retorno a PreferredSizeWidget
   PreferredSizeWidget _buildAppBar() {
     return AppBar(
       title: Text(
@@ -226,11 +225,10 @@ class _AprobarArchivosScreenState extends State<AprobarArchivosScreen> {
     return Scaffold(
       appBar: _buildAppBar(),
       body: Column(
-        crossAxisAlignment: CrossAxisAlignment.center, // Cambiado a center
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           SizedBox(height: 10),
           Center(
-            // Widget Center añadido
             child: Text(
               "Verificación",
               style: GoogleFonts.caveat(
@@ -240,7 +238,6 @@ class _AprobarArchivosScreenState extends State<AprobarArchivosScreen> {
               ),
             ),
           ),
-          // Contenido principal (lista de archivos)
           Expanded(
             child:
                 _isLoading
@@ -323,7 +320,6 @@ class _AprobarArchivosScreenState extends State<AprobarArchivosScreen> {
                                               visitaId: widget.visitaId,
                                               alumnoId: alumnoId,
                                               nombreAlumno: nombreAlumno,
-                                              archivos: archivosAlumno,
                                             ),
                                       ),
                                     );
