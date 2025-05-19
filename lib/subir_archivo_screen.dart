@@ -1,7 +1,7 @@
 // ignore_for_file: library_private_types_in_public_api
 
-import 'dart:async';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:file_picker/file_picker.dart';
@@ -27,7 +27,9 @@ class SubirArchivoScreen extends StatefulWidget {
 class _SubirArchivoScreenState extends State<SubirArchivoScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseStorage _storage = FirebaseStorage.instance;
-  File? _archivo;
+  File? _archivo; // Solo para móvil
+  Uint8List? _archivoWebBytes; // Solo para web
+  PlatformFile? _platformFile; // Para ambas plataformas
   String? _tipoSeleccionado;
   bool _cargando = false;
   bool _esMayorEdad = false;
@@ -186,12 +188,22 @@ class _SubirArchivoScreenState extends State<SubirArchivoScreen> {
       );
 
       if (resultado != null && resultado.files.isNotEmpty) {
-        final archivo = File(resultado.files.single.path!);
-        if (archivo.lengthSync() > 5 * 1024 * 1024) {
+        final file = resultado.files.first;
+
+        // Verificar tamaño del archivo (5MB máximo)
+        if (file.size > 5 * 1024 * 1024) {
           _mostrarMensaje('El archivo no debe exceder 5MB', Colors.red);
           return;
         }
-        setState(() => _archivo = archivo);
+
+        setState(() {
+          _platformFile = file;
+          if (kIsWeb) {
+            _archivoWebBytes = file.bytes;
+          } else {
+            _archivo = File(file.path!);
+          }
+        });
       }
     } catch (e) {
       _mostrarMensaje('Error al seleccionar archivo: $e', Colors.red);
@@ -199,16 +211,30 @@ class _SubirArchivoScreenState extends State<SubirArchivoScreen> {
   }
 
   Future<void> _subirDocumento() async {
-    if (_tipoSeleccionado == null || _archivo == null) return;
+    if (_tipoSeleccionado == null ||
+        (_archivo == null && _archivoWebBytes == null)) {
+      _mostrarMensaje('Selecciona un archivo', Colors.orange);
+      return;
+    }
 
     setState(() => _cargando = true);
     try {
-      final nombreArchivo = _generarNombreArchivo(_tipoSeleccionado!);
+      final extension = _platformFile?.extension ?? 'pdf';
+      final nombreArchivo = _generarNombreArchivo(
+        _tipoSeleccionado!,
+        extension,
+      );
       final rutaStorage =
           'visitas/${widget.visitaId}/${widget.alumnoId}/$nombreArchivo';
       final referencia = _storage.ref().child(rutaStorage);
 
-      await referencia.putFile(_archivo!);
+      // Subir archivo según la plataforma
+      if (kIsWeb) {
+        await referencia.putData(_archivoWebBytes!);
+      } else {
+        await referencia.putFile(_archivo!);
+      }
+
       final url = await referencia.getDownloadURL();
 
       // Eliminar archivo anterior si existe
@@ -282,9 +308,8 @@ class _SubirArchivoScreenState extends State<SubirArchivoScreen> {
     });
   }
 
-  String _generarNombreArchivo(String tipo) {
+  String _generarNombreArchivo(String tipo, String extension) {
     final timestamp = DateTime.now().millisecondsSinceEpoch;
-    final extension = _archivo?.path.split('.').last ?? 'pdf';
     return '${tipo}_${widget.alumnoId}_$timestamp.$extension';
   }
 
@@ -340,6 +365,8 @@ class _SubirArchivoScreenState extends State<SubirArchivoScreen> {
                   (value) => setState(() {
                     _tipoSeleccionado = value;
                     _archivo = null;
+                    _archivoWebBytes = null;
+                    _platformFile = null;
                   }),
               decoration: InputDecoration(
                 border: OutlineInputBorder(
@@ -453,20 +480,25 @@ class _SubirArchivoScreenState extends State<SubirArchivoScreen> {
                     ),
 
                     // Vista previa archivo
-                    if (_archivo != null) ...[
+                    if (_platformFile != null) ...[
                       const SizedBox(height: 16),
                       ListTile(
                         leading: Icon(
                           Icons.insert_drive_file,
                           color:
-                              _archivo!.path.endsWith('.pdf')
+                              _platformFile!.extension == 'pdf'
                                   ? Colors.red
                                   : Colors.blue,
                         ),
-                        title: Text(_archivo!.path.split('/').last),
+                        title: Text(_platformFile!.name),
                         trailing: IconButton(
                           icon: const Icon(Icons.close),
-                          onPressed: () => setState(() => _archivo = null),
+                          onPressed:
+                              () => setState(() {
+                                _platformFile = null;
+                                _archivo = null;
+                                _archivoWebBytes = null;
+                              }),
                         ),
                       ),
                       const SizedBox(height: 16),
