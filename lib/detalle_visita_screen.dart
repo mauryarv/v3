@@ -40,7 +40,6 @@ class _DetalleVisitaScreenState extends State<DetalleVisitaScreen> {
       if (visitaSnapshot.exists) {
         setState(() {
           visitaDetalles = visitaSnapshot.data() as Map<String, dynamic>;
-          // Los profesores ya están como nombres en el documento
           nombresProfesores =
               visitaDetalles!['profesores'] != null
                   ? List<String>.from(visitaDetalles!['profesores'])
@@ -69,21 +68,42 @@ class _DetalleVisitaScreenState extends State<DetalleVisitaScreen> {
         return;
       }
 
-      final query = _firestore
-          .collection('usuarios')
-          .where(FieldPath.documentId, whereIn: alumnosIds);
+      // Dividir la lista en chunks de máximo 30 elementos
+      final chunks = _chunkList(alumnosIds, 30);
+      final List<String> nombres = [];
 
-      final snapshot = await query.get();
-      final nombres =
+      for (final chunk in chunks) {
+        final query = _firestore
+            .collection('usuarios')
+            .where(FieldPath.documentId, whereIn: chunk);
+
+        final snapshot = await query.get();
+        nombres.addAll(
           snapshot.docs
               .map((doc) => doc['nombre']?.toString() ?? 'Nombre no disponible')
-              .toList();
+              .toList(),
+        );
+      }
 
       setState(() => nombresAlumnos = nombres);
     } catch (e) {
       _mostrarError('Error al cargar los nombres de los alumnos: $e');
       setState(() => nombresAlumnos = ['Error al cargar nombres']);
     }
+  }
+
+  // Función auxiliar para dividir una lista en chunks
+  List<List<T>> _chunkList<T>(List<T> list, int chunkSize) {
+    List<List<T>> chunks = [];
+    for (var i = 0; i < list.length; i += chunkSize) {
+      chunks.add(
+        list.sublist(
+          i,
+          i + chunkSize > list.length ? list.length : i + chunkSize,
+        ),
+      );
+    }
+    return chunks;
   }
 
   void _mostrarError(String mensaje) {
