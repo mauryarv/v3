@@ -3,6 +3,7 @@
 import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -406,6 +407,112 @@ class _AdminScreenState extends State<AdminScreen> {
             ),
           ),
     );
+  }
+
+  Future<void> _mostrarDialogoGestionAdmins() async {
+    // Obtener lista actual de administradores
+    final adminsSnapshot =
+        await _firestore
+            .collection('usuarios')
+            .where('rol', isEqualTo: 'administrador')
+            .get();
+
+    final admins = adminsSnapshot.docs;
+
+    // Obtener el ID del administrador actual
+    final prefs = await SharedPreferences.getInstance();
+    final currentAdminId = prefs.getString('user_id') ?? '';
+
+    await showDialog(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            title: const Text('Gestionar Administradores'),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('Administradores actuales:'),
+                  const SizedBox(height: 16),
+                  if (admins.isEmpty)
+                    const Text('No hay administradores registrados')
+                  else
+                    ...admins.map(
+                      (admin) => ListTile(
+                        title: Text(admin['nombre'] ?? 'Sin nombre'),
+                        subtitle: Text(admin.id),
+                        trailing:
+                            admins.length > 1 && admin.id != currentAdminId
+                                ? IconButton(
+                                  icon: const Icon(
+                                    Icons.delete,
+                                    color: Colors.red,
+                                  ),
+                                  onPressed:
+                                      () => _eliminarAdmin(admin.id, context),
+                                )
+                                : null,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cerrar'),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.deepPurple,
+                ),
+                onPressed: () {
+                  Navigator.pop(context);
+                  _mostrarDialogoAgregarAdmin();
+                },
+                child: const Text(
+                  'Agregar Nuevo',
+                  style: TextStyle(color: Colors.white),
+                ),
+              ),
+            ],
+          ),
+    );
+  }
+
+  Future<void> _eliminarAdmin(
+    String adminId,
+    BuildContext dialogContext,
+  ) async {
+    final confirm = await _showConfirmationDialog(
+      title: "Eliminar Administrador",
+      content: "¿Estás seguro de que deseas eliminar este administrador?",
+      confirmText: "Eliminar",
+      confirmColor: Colors.red,
+    );
+
+    if (confirm) {
+      try {
+        // Verificar que no sea el último administrador
+        final adminsSnapshot =
+            await _firestore
+                .collection('usuarios')
+                .where('rol', isEqualTo: 'administrador')
+                .get();
+
+        if (adminsSnapshot.docs.length <= 1) {
+          _mostrarError("No se puede eliminar el único administrador");
+          return;
+        }
+
+        await _firestore.collection('usuarios').doc(adminId).delete();
+        if (dialogContext.mounted) Navigator.pop(dialogContext);
+        _mostrarExito("Administrador eliminado correctamente");
+      } catch (e) {
+        _mostrarError("Error al eliminar administrador: ${e.toString()}");
+      }
+    }
   }
 
   Future<void> _cargarAlumnosDesdeExcel() async {
@@ -814,21 +921,110 @@ class _AdminScreenState extends State<AdminScreen> {
     }
   }
 
-  Future<void> _eliminarVisita(String visitaId) async {
+  Future<void> _eliminarVisitaCompleta(String visitaId) async {
     final confirm = await _showConfirmationDialog(
       title: "Eliminar visita",
-      content: "Esta acción no se puede deshacer. ¿Deseas continuar?",
+      content:
+          "¿Estás seguro de eliminar esta visita con todos sus datos asociados?",
       confirmText: "Eliminar",
     );
 
-    if (confirm) {
-      try {
-        await _firestore.collection("visitas_escolares").doc(visitaId).delete();
-        _mostrarExito("Visita eliminada correctamente");
-      } catch (e) {
-        _mostrarError("Error al eliminar visita: $e");
+    if (!confirm) return;
+
+    try {
+      // Mostrar indicador de carga
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder:
+            (context) => const AlertDialog(
+              title: Text("Eliminando visita"),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 16),
+                  Text("Eliminando visita y datos asociados..."),
+                ],
+              ),
+            ),
+      );
+
+      // 1. Eliminar archivos en Storage
+      await _eliminarArchivosVisita(visitaId);
+
+      // 2. Eliminar subcolecciones
+      await _eliminarSubcoleccionesVisita(visitaId);
+
+      // 3. Eliminar documento principal
+      await _firestore.collection('visitas').doc(visitaId).delete();
+
+      // Cerrar diálogo de carga
+      Navigator.of(context, rootNavigator: true).pop();
+
+      _mostrarExito("Visita eliminada completamente con todos sus datos");
+    } catch (e) {
+      Navigator.of(context, rootNavigator: true).pop();
+      _mostrarError("Error al eliminar visita: ${e.toString()}");
+    }
+  }
+
+  Future<void> _eliminarSubcoleccionesVisita(String visitaId) async {
+    // Lista de todas las subcolecciones que necesitas eliminar
+    final subcolecciones = [
+      'datos_emergencia',
+      'otra_subcoleccion',
+    ]; // Agrega todas las que tengas
+
+    await Future.wait(
+      subcolecciones.map((subcoleccion) async {
+        // Obtener todos los documentos de la subcolección
+        final snapshot =
+            await _firestore
+                .collection('visitas')
+                .doc(visitaId)
+                .collection(subcoleccion)
+                .get();
+
+        // Eliminar todos los documentos en batch
+        final batch = _firestore.batch();
+        for (final doc in snapshot.docs) {
+          batch.delete(doc.reference);
+        }
+        await batch.commit();
+      }),
+    );
+  }
+
+  Future<void> _eliminarArchivosVisita(String visitaId) async {
+    try {
+      final storageRef = FirebaseStorage.instance.ref().child(
+        'visitas/$visitaId',
+      );
+      final listResult = await storageRef.listAll();
+
+      // Eliminar todos los archivos y subcarpetas
+      await Future.wait([
+        ...listResult.items.map((fileRef) => fileRef.delete()),
+        ...listResult.prefixes.map(
+          (folderRef) => _eliminarCarpetaCompleta(folderRef),
+        ),
+      ]);
+    } on FirebaseException catch (e) {
+      if (e.code != 'object-not-found') {
+        rethrow;
       }
     }
+  }
+
+  Future<void> _eliminarCarpetaCompleta(Reference folderRef) async {
+    final listResult = await folderRef.listAll();
+    await Future.wait([
+      ...listResult.items.map((fileRef) => fileRef.delete()),
+      ...listResult.prefixes.map(
+        (subFolderRef) => _eliminarCarpetaCompleta(subFolderRef),
+      ),
+    ]);
   }
 
   Future<void> _editarVisita(DocumentSnapshot visita) async {
@@ -1102,7 +1298,7 @@ class _AdminScreenState extends State<AdminScreen> {
                       ),
                       IconButton(
                         icon: Icon(Icons.delete, color: Colors.red),
-                        onPressed: () => _eliminarVisita(doc.id),
+                        onPressed: () => _eliminarVisitaCompleta(doc.id),
                       ),
                     ],
                   ),
@@ -1289,14 +1485,14 @@ class _AdminScreenState extends State<AdminScreen> {
                         ),
                         ElevatedButton.icon(
                           icon: const Icon(
-                            Icons.person_add,
+                            Icons.admin_panel_settings,
                             color: Colors.white,
                           ),
                           label: const Text(
-                            'Agregar Administrador',
+                            'Gestionar Administradores',
                             style: TextStyle(color: Colors.white),
                           ),
-                          onPressed: _mostrarDialogoAgregarAdmin,
+                          onPressed: _mostrarDialogoGestionAdmins,
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.deepPurple[700],
                             padding: const EdgeInsets.symmetric(
