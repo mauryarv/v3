@@ -59,7 +59,7 @@ class _ProfesorScreenState extends State<ProfesorScreen> {
       final visitasSnapshot =
           await _firestore
               .collection('visitas_escolares')
-              .where('profesor', isEqualTo: profesorNombre)
+              .where('profesores', arrayContains: profesorNombre)
               .get();
 
       setState(() {
@@ -68,12 +68,10 @@ class _ProfesorScreenState extends State<ProfesorScreen> {
               final data = doc.data();
               return {
                 'id': doc.id,
-                'titulo': data['titulo'] ?? 'Sin título',
-                'empresa': data['empresa'] ?? 'Sin empresa',
+                'ubicacion': data['ubicacion'] ?? 'Ubicación no disponible',
                 'grupo': data['grupo'] ?? 'Sin grupo',
                 'fecha_hora': (data['fecha_hora'] as Timestamp?)?.toDate(),
                 'estado': data['estado'] ?? 'pendiente',
-                'ubicacion': data['ubicacion'] ?? 'Ubicación no disponible',
               };
             }).toList();
         _filteredVisitas = List.from(visitas);
@@ -91,10 +89,10 @@ class _ProfesorScreenState extends State<ProfesorScreen> {
       } else {
         _filteredVisitas =
             visitas.where((visita) {
-              return visita['titulo'].toString().toLowerCase().contains(
+              return visita['id'].toString().toLowerCase().contains(
                     _searchText,
                   ) ||
-                  visita['empresa'].toString().toLowerCase().contains(
+                  visita['ubicacion'].toString().toLowerCase().contains(
                     _searchText,
                   ) ||
                   visita['grupo'].toString().toLowerCase().contains(
@@ -197,7 +195,7 @@ class _ProfesorScreenState extends State<ProfesorScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                visita['titulo'] as String? ?? 'Sin título',
+                'ID: ${visita['id']}',
                 style: GoogleFonts.poppins(
                   fontSize: 18,
                   fontWeight: FontWeight.w600,
@@ -207,10 +205,10 @@ class _ProfesorScreenState extends State<ProfesorScreen> {
               const SizedBox(height: 8),
               Row(
                 children: [
-                  Icon(Icons.business, size: 16, color: Colors.grey[600]),
+                  Icon(Icons.location_on, size: 16, color: Colors.grey[600]),
                   const SizedBox(width: 8),
                   Text(
-                    visita['empresa'] as String? ?? 'Sin empresa',
+                    visita['ubicacion'] as String? ?? 'Sin ubicación',
                     style: GoogleFonts.roboto(
                       fontSize: 14,
                       color: Colors.grey[800],
